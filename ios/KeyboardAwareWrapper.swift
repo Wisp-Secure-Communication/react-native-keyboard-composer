@@ -251,10 +251,10 @@ class KeyboardAwareWrapper: ExpoView, KeyboardAwareScrollHandlerDelegate {
     
     /// Base button offset (when keyboard is closed) - used for constraint
     private func calculateBaseButtonOffset() -> CGFloat {
-        let buttonPadding: CGFloat = 3
         let composerHeight = lastComposerHeight > 0 ? lastComposerHeight : extraBottomInset
-        // Button above safe area + composer + content gap
-        return safeAreaBottom + composerHeight + CONTENT_GAP + buttonPadding
+        // Button sits just above the composer (small gap, not the full CONTENT_GAP)
+        let buttonGap: CGFloat = 8  // Same as COMPOSER_KEYBOARD_GAP
+        return safeAreaBottom + composerHeight + buttonGap
     }
     
     /// Update button transform to animate with keyboard (called inside animation block)

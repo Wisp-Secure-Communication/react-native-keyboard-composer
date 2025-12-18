@@ -11,7 +11,6 @@ import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
 import android.text.method.ScrollingMovementMethod
-import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
@@ -26,10 +25,6 @@ import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
 
 class KeyboardComposerView(context: Context, appContext: AppContext) : ExpoView(context, appContext) {
-
-    companion object {
-        private const val TAG = "KeyboardComposerView"
-    }
 
     // MARK: - Event Dispatchers
     private val onChangeText by EventDispatcher()
@@ -103,8 +98,6 @@ class KeyboardComposerView(context: Context, appContext: AppContext) : ExpoView(
     private var maxHeightPx: Int = 0
 
     init {
-        Log.d(TAG, "KeyboardComposerView init started")
-        
         minHeightPx = dpToPx(minHeightDp)
         maxHeightPx = dpToPx(maxHeightDp)
         currentHeight = minHeightPx
@@ -131,7 +124,6 @@ class KeyboardComposerView(context: Context, appContext: AppContext) : ExpoView(
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
                 override fun afterTextChanged(s: Editable?) {
-                    Log.d(TAG, "Text changed: ${s?.length ?: 0} chars")
                     onChangeText(mapOf("text" to (s?.toString() ?: "")))
                     post { updateHeight() }
                     updateSendButtonState()
@@ -139,7 +131,6 @@ class KeyboardComposerView(context: Context, appContext: AppContext) : ExpoView(
             })
 
             setOnFocusChangeListener { _, hasFocus ->
-                Log.d(TAG, "Focus changed: $hasFocus")
                 if (hasFocus) {
                     performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                     onComposerFocus(emptyMap())
@@ -157,7 +148,6 @@ class KeyboardComposerView(context: Context, appContext: AppContext) : ExpoView(
             contentDescription = "Send message"
 
             setOnClickListener {
-                Log.d(TAG, "Button clicked, isStreaming=$isStreaming")
                 if (isStreaming) {
                     handleStop()
                 } else {
@@ -179,8 +169,26 @@ class KeyboardComposerView(context: Context, appContext: AppContext) : ExpoView(
         updateSendButtonState()
 
         post {
-            Log.d(TAG, "Emitting initial height: $minHeightDp")
             onHeightChange(mapOf("height" to minHeightDp.toDouble()))
+            
+            // Ensure placeholder is visible after layout
+            if (editText.hint.isNullOrEmpty()) {
+                editText.hint = placeholderText
+            }
+            
+            // Re-apply hint and color after layout
+            editText.setHintTextColor(getPlaceholderColor())
+            editText.hint = placeholderText
+            editText.requestLayout()
+            editText.invalidate()
+            
+            // Second post to ensure layout is complete
+            post {
+                if (editText.width > 0 && editText.height > 0 && editText.text.isNullOrEmpty()) {
+                    editText.setHintTextColor(getPlaceholderColor())
+                    editText.invalidate()
+                }
+            }
         }
     }
     
@@ -201,7 +209,6 @@ class KeyboardComposerView(context: Context, appContext: AppContext) : ExpoView(
         val text = editText.text?.toString() ?: ""
         if (text.isEmpty()) return
 
-        Log.d(TAG, "Sending: $text")
         performHapticFeedback(HapticFeedbackConstants.CONFIRM)
         onSend(mapOf("text" to text))
         editText.setText("")
@@ -210,7 +217,6 @@ class KeyboardComposerView(context: Context, appContext: AppContext) : ExpoView(
     }
 
     private fun handleStop() {
-        Log.d(TAG, "Stop pressed")
         performHapticFeedback(HapticFeedbackConstants.CONFIRM)
         onStop(emptyMap())
     }
@@ -224,7 +230,6 @@ class KeyboardComposerView(context: Context, appContext: AppContext) : ExpoView(
         }
         sendButton.setImageDrawable(drawable)
         sendButton.visibility = View.VISIBLE
-        Log.d(TAG, "Button appearance updated, isStreaming=$isStreaming")
         updateSendButtonState()
     }
 
@@ -333,13 +338,10 @@ class KeyboardComposerView(context: Context, appContext: AppContext) : ExpoView(
         
         val measuredHeight = editText.measuredHeight
         val newHeight = measuredHeight.coerceIn(minHeightPx, maxHeightPx)
-        
-        Log.d(TAG, "updateHeight: measured=$measuredHeight, min=$minHeightPx, max=$maxHeightPx, new=$newHeight")
 
         if (newHeight != currentHeight) {
             currentHeight = newHeight
             val heightDp = pxToDp(newHeight.toFloat())
-            Log.d(TAG, "Height changed to: $heightDp dp")
             onHeightChange(mapOf("height" to heightDp.toDouble()))
             requestLayout()
         }
@@ -426,7 +428,7 @@ class KeyboardComposerView(context: Context, appContext: AppContext) : ExpoView(
     }
     
     private fun getPlaceholderColor(): Int {
-        return if (isDarkMode()) Color.parseColor("#808080") else Color.parseColor("#999999")
+        return if (isDarkMode()) Color.parseColor("#AAAAAA") else Color.parseColor("#666666")
     }
 
     private fun getBackgroundColor(): Int {

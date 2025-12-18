@@ -1,15 +1,26 @@
 # @launchhq/react-native-keyboard-composer
 
-A native keyboard-aware composer component for React Native with smooth keyboard animations. Perfect for chat applications and any UI that requires pixel-perfect keyboard synchronization.
+A native keyboard-aware composer for React Native chat applications. Built specifically for AI chat interfaces like ChatGPT and v0, where content needs to react intelligently to keyboard and input changes.
+
+## The Problem
+
+In chat applications, keyboard handling is notoriously difficult:
+
+- When should content push up vs the keyboard overlay content?
+- How do you maintain the gap between the last message and composer as the input grows?
+- What happens when the user scrolls while the keyboard is open, then closes it?
+
+This library solves all of that with native implementations that handle the edge cases.
 
 ## Features
 
-- 🎯 **Pixel-perfect keyboard animations** - Uses native APIs for smooth 60fps keyboard tracking
-- 📱 **iOS & Android only** - Native implementations for mobile platforms (no web support)
-- ⌨️ **Auto-growing text input** - Composer expands as you type
-- 🔄 **Scroll-to-bottom button** - Automatically appears when content exceeds viewport
+- 💬 **Built for chat UIs** - Content reacts correctly to keyboard open/close
+- 📏 **Smart content positioning** - Knows when to push content up vs overlay
+- ⌨️ **Auto-growing input** - Composer expands with text, content adjusts accordingly
+- 🔄 **Scroll-to-bottom button** - Appears when you scroll away from latest messages
+- 📱 **iOS & Android parity** - Same behavior on both platforms
+- 🎛️ **Streaming support** - Built-in stop button for AI streaming responses
 - 🌙 **Dark mode support** - Automatically adapts to system theme
-- 🎨 **Customizable** - Placeholder, height constraints, streaming state, and more
 
 ## Installation
 
@@ -207,13 +218,16 @@ const styles = StyleSheet.create({
 
 ## How It Works
 
-### iOS
+The library handles three key scenarios:
 
-Uses `keyboardLayoutGuide` (iOS 15+) with `CADisplayLink` for 60fps keyboard position tracking. Falls back to `keyboardWillShow`/`keyboardWillHide` notifications for older iOS versions.
+1. **Keyboard opens** - Content pushes up to keep the last message visible above the composer
+2. **Input grows/shrinks** - As you type multiple lines, content scrolls to maintain the gap between your last message and the composer
+3. **Keyboard closes** - If you scrolled while the keyboard was open, content adjusts to prevent awkward gaps
 
-### Android
+### Technical Details
 
-Uses `WindowInsetsAnimationCompat` for frame-by-frame keyboard position updates. This provides smooth, synchronized animations between the keyboard and content.
+- **iOS**: Uses `keyboardLayoutGuide` (iOS 15+) with `CADisplayLink` for frame-accurate positioning
+- **Android**: Uses `WindowInsetsAnimationCompat` for synchronized keyboard tracking
 
 ## Platform Support
 

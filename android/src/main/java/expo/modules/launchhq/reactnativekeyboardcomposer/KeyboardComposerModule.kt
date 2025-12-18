@@ -1,6 +1,5 @@
 package expo.modules.launchhq.reactnativekeyboardcomposer
 
-import android.util.Log
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
@@ -9,16 +8,8 @@ import expo.modules.kotlin.modules.ModuleDefinition
  */
 class KeyboardComposerModule : Module() {
 
-    companion object {
-        private const val TAG = "KeyboardComposerModule"
-    }
-
     override fun definition() = ModuleDefinition {
         Name("KeyboardComposer")
-
-        OnCreate {
-            Log.d(TAG, "KeyboardComposerModule created")
-        }
 
         // KeyboardComposerView
         View(KeyboardComposerView::class) {
@@ -71,7 +62,6 @@ class KeyboardComposerModule : Module() {
         // Auto-named as "KeyboardComposer_KeyboardAwareWrapper"
         View(KeyboardAwareWrapper::class) {
             Prop("extraBottomInset") { view: KeyboardAwareWrapper, value: Float ->
-                Log.d(TAG, "🎯 [Native] Received extraBottomInset prop: $value")
                 view.extraBottomInset = value
             }
 
