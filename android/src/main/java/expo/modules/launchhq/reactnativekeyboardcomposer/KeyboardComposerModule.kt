@@ -68,8 +68,10 @@ class KeyboardComposerModule : Module() {
         }
 
         // KeyboardAwareWrapper
+        // Auto-named as "KeyboardComposer_KeyboardAwareWrapper"
         View(KeyboardAwareWrapper::class) {
             Prop("extraBottomInset") { view: KeyboardAwareWrapper, value: Float ->
+                Log.d(TAG, "🎯 [Native] Received extraBottomInset prop: $value")
                 view.extraBottomInset = value
             }
 

@@ -16,6 +16,7 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
     private var keyboardHeight: CGFloat = 0
     private var wasAtBottom = false
     private var isAtBottom = true
+    private var isKeyboardVisible = false  // Track if keyboard is already showing
     
     /// Get safe area bottom from window
     private var safeAreaBottom: CGFloat {
@@ -59,11 +60,19 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
               let curveValue = userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt
         else { return }
         
-        // Check if at bottom BEFORE animation
-        wasAtBottom = isNearBottom(scrollView)
-        keyboardHeight = keyboardFrame.height
+        let newKeyboardHeight = keyboardFrame.height
         
-        print("⌨️ [KeyboardHandler] keyboard showing: height=\(keyboardHeight), wasAtBottom=\(wasAtBottom)")
+        // Only do scroll-to-bottom logic on INITIAL keyboard show, not on subsequent height changes
+        let isInitialShow = !isKeyboardVisible
+        isKeyboardVisible = true
+        
+        // Check if at bottom BEFORE animation (only on initial show)
+        if isInitialShow {
+            wasAtBottom = isNearBottom(scrollView)
+        }
+        keyboardHeight = newKeyboardHeight
+        
+        print("⌨️ [KeyboardHandler] keyboard showing: height=\(keyboardHeight), wasAtBottom=\(wasAtBottom), isInitialShow=\(isInitialShow)")
         
         // Use raw UIView.animate with keyboard's exact animation curve
         // The curve value (7) is converted to animation options by shifting left 16 bits
@@ -77,8 +86,8 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
                 // Update content inset
                 self.updateContentInset()
                 
-                // Scroll to bottom INSIDE animation block
-                if self.wasAtBottom {
+                // Scroll to bottom INSIDE animation block - ONLY on initial keyboard show
+                if isInitialShow && self.wasAtBottom {
                     let contentHeight = scrollView.contentSize.height
                     let scrollViewHeight = scrollView.bounds.height
                     let keyboardOpenPadding: CGFloat = 8
@@ -98,6 +107,7 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
         else { return }
         
         keyboardHeight = 0
+        isKeyboardVisible = false  // Reset flag when keyboard hides
         
         print("⌨️ [KeyboardHandler] keyboard hiding")
         
@@ -126,8 +136,11 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
         return (maxOffset - currentOffset) < 100
     }
     
-    private func updateContentInset() {
+    private func updateContentInset(preserveScrollPosition: Bool = false) {
         guard let scrollView = scrollView else { return }
+        
+        // Save current scroll position if we need to preserve it
+        let savedOffset = preserveScrollPosition ? scrollView.contentOffset : nil
         
         // The composer's paddingBottom from animatedPaddingStyle:
         // - Keyboard closed: safeAreaBottom + Spacing.sm
@@ -145,6 +158,11 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
         
         scrollView.contentInset.bottom = totalInset
         scrollView.verticalScrollIndicatorInsets.bottom = totalInset
+        
+        // Restore scroll position if needed (prevents visual jump when not at bottom)
+        if let savedOffset = savedOffset {
+            scrollView.contentOffset = savedOffset
+        }
         
         print("⌨️ [KeyboardHandler] contentInset.bottom = \(totalInset) (keyboard=\(keyboardHeight), base=\(baseBottomInset))")
     }
@@ -228,6 +246,12 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
         checkAndUpdateScrollPosition()
     }
     
+    /// Check if user is currently near the bottom of the scroll view
+    func isUserNearBottom() -> Bool {
+        guard let scrollView = scrollView else { return true }
+        return isNearBottom(scrollView)
+    }
+    
     @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
         // Dismiss keyboard by ending editing on the window
         scrollView?.window?.endEditing(true)
@@ -240,10 +264,44 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
         return true
     }
     
-    func setBaseInset(_ inset: CGFloat) {
-        print("⌨️ [KeyboardHandler] setBaseInset: \(inset), scrollView: \(scrollView != nil ? "attached" : "nil")")
+    func setBaseInset(_ inset: CGFloat, preserveScrollPosition: Bool = false) {
+        print("⌨️ [KeyboardHandler] setBaseInset: \(inset), scrollView: \(scrollView != nil ? "attached" : "nil"), preserve=\(preserveScrollPosition)")
         baseBottomInset = inset
-        updateContentInset()
+        updateContentInset(preserveScrollPosition: preserveScrollPosition)
+    }
+    
+    /// Adjust scroll position when composer grows to keep content visible.
+    /// Only adjusts if user is near the bottom (within 100pt).
+    func adjustScrollForComposerGrowth(delta: CGFloat) {
+        guard let scrollView = scrollView, delta > 0 else { return }
+        
+        let contentHeight = scrollView.contentSize.height
+        let scrollViewHeight = scrollView.bounds.height
+        let currentInset = scrollView.contentInset.bottom
+        let currentOffset = scrollView.contentOffset.y
+        
+        // Check if near bottom - only adjust scroll if user is already at/near bottom
+        let currentMaxOffset = max(0, contentHeight - scrollViewHeight + currentInset)
+        let distanceFromBottom = currentMaxOffset - currentOffset
+        let nearBottom = distanceFromBottom < 100
+        
+        guard nearBottom else {
+            print("⌨️ [KeyboardHandler] adjustScrollForComposerGrowth: skipped (not near bottom, dist=\(distanceFromBottom))")
+            return
+        }
+        
+        // Scroll up by the delta amount to compensate for composer growth
+        let newOffset = currentOffset + delta
+        
+        // Clamp to valid range - account for the pending inset increase (delta)
+        let bottomInset = currentInset + delta
+        let maxOffset = max(0, contentHeight - scrollViewHeight + bottomInset)
+        let clampedOffset = max(0, min(newOffset, maxOffset))
+        
+        print("⌨️ [KeyboardHandler] adjustScrollForComposerGrowth: delta=\(delta), offset \(currentOffset) -> \(clampedOffset)")
+        
+        // Apply immediately
+        scrollView.setContentOffset(CGPoint(x: 0, y: clampedOffset), animated: false)
     }
     
     /// Scroll so that new content appears at the top of the visible area (ChatGPT-style).

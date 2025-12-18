@@ -36,10 +36,28 @@ class KeyboardAwareWrapper(context: Context, appContext: AppContext) : ExpoView(
         private const val CONTENT_GAP_DP = 24
         private const val COMPOSER_KEYBOARD_GAP_DP = 8
         private const val BUTTON_SIZE_DP = 56
-        private const val BUTTON_PADDING_DP = 8
+        private const val BUTTON_PADDING_DP = 6
     }
+    
+    // Track actual composer height (measured from view, not prop)
+    private var lastComposerHeight: Int = 0
 
-    var extraBottomInset: Float = 64f
+    private var _extraBottomInset: Float = 64f
+    var extraBottomInset: Float
+        get() = _extraBottomInset
+        set(value) {
+            val oldValue = _extraBottomInset
+            val delta = value - oldValue
+            _extraBottomInset = value
+            
+            Log.d(TAG, "📐 extraBottomInset: $oldValue -> $value, delta=$delta")
+            
+            // When composer grows, scroll content up to keep last message visible
+            if (delta > 0) {
+                adjustScrollForComposerGrowth(delta.toInt())
+            }
+        }
+    
     var scrollToTopTrigger: Double = 0.0
 
     private var scrollView: ScrollView? = null
@@ -96,11 +114,38 @@ class KeyboardAwareWrapper(context: Context, appContext: AppContext) : ExpoView(
             button.bringToFront()
         }
         
+        // Detect composer height changes from actual view (more reliable than props with Fabric)
+        composerView?.let { composer ->
+            val currentHeight = composer.height
+            if (currentHeight > 0 && kotlin.math.abs(currentHeight - lastComposerHeight) > 1) {
+                val delta = currentHeight - lastComposerHeight
+                Log.d(TAG, "📐 composer height changed: $lastComposerHeight -> $currentHeight, delta=$delta")
+                
+                if (delta > 0 && lastComposerHeight > 0) {
+                    // Composer grew - adjust scroll if near bottom
+                    adjustScrollForComposerGrowth(delta)
+                }
+                
+                // Update base inset with actual composer height
+                updateScrollPadding()
+                lastComposerHeight = currentHeight
+            }
+        }
+        
         updateScrollButtonPosition()
         
         if (!hasAttached) {
             post { findAndAttachViews() }
         }
+    }
+    
+    private fun updateScrollPadding() {
+        val sv = scrollView ?: return
+        val contentGap = dpToPx(CONTENT_GAP_DP)
+        val composerHeight = if (lastComposerHeight > 0) lastComposerHeight else extraBottomInset.toInt()
+        val bottomSpace = if (currentKeyboardHeight > 0) currentKeyboardHeight else safeAreaBottom
+        val finalPadding = composerHeight + contentGap + bottomSpace
+        sv.setPadding(sv.paddingLeft, sv.paddingTop, sv.paddingRight, finalPadding)
     }
 
     private fun findAndAttachViews() {
@@ -389,7 +434,9 @@ class KeyboardAwareWrapper(context: Context, appContext: AppContext) : ExpoView(
         val buttonPadding = dpToPx(BUTTON_PADDING_DP)
         val contentGap = dpToPx(CONTENT_GAP_DP)
         val composerGap = dpToPx(COMPOSER_KEYBOARD_GAP_DP)
-        val composerHeight = extraBottomInset.toInt()
+        
+        // Use actual measured composer height (not prop which may include padding)
+        val composerHeight = if (lastComposerHeight > 0) lastComposerHeight else extraBottomInset.toInt()
         
         val effectiveKeyboard = (currentKeyboardHeight - safeAreaBottom).coerceAtLeast(0)
         
@@ -440,6 +487,31 @@ class KeyboardAwareWrapper(context: Context, appContext: AppContext) : ExpoView(
         val maxScroll = getMaxScroll(sv)
         sv.smoothScrollTo(0, maxScroll)
         Log.d(TAG, "📍 Scroll to bottom: $maxScroll")
+    }
+    
+    private fun adjustScrollForComposerGrowth(delta: Int) {
+        val sv = scrollView ?: return
+        if (delta <= 0) return
+        
+        val currentScrollY = sv.scrollY
+        val currentMaxScroll = getMaxScroll(sv)
+        val distanceFromBottom = currentMaxScroll - currentScrollY
+        
+        // Only adjust if we're near the bottom (within 100dp, matching iOS)
+        if (distanceFromBottom > dpToPx(100)) {
+            Log.d(TAG, "📍 adjustScrollForComposerGrowth: skipped (not near bottom, dist=$distanceFromBottom)")
+            return
+        }
+        
+        // Scroll up by the delta amount immediately
+        val newScrollY = currentScrollY + delta
+        
+        // Account for pending padding increase in maxScroll calculation
+        val maxScroll = currentMaxScroll + delta
+        val clampedScrollY = newScrollY.coerceIn(0, maxScroll)
+        
+        sv.scrollTo(0, clampedScrollY)
+        Log.d(TAG, "📍 adjustScrollForComposerGrowth: delta=$delta, $currentScrollY -> $clampedScrollY")
     }
     
     private fun checkAndUpdateScrollPosition() {

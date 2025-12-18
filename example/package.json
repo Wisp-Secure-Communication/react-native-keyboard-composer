@@ -1,17 +1,21 @@
 {
   "name": "react-native-keyboard-composer-example",
   "version": "1.0.0",
+  "packageManager": "pnpm@10.15.0",
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
-    "android": "expo run:android",
-    "ios": "expo run:ios",
-    "web": "expo start --web"
+    "android": "pnpm exec expo run:android --device",
+    "ios": "pnpm exec expo run:ios --device",
+    "prebuild": "expo prebuild --clean"
   },
   "dependencies": {
+    "@legendapp/list": "^2.0.18",
     "expo": "~54.0.29",
+    "expo-linking": "~8.0.10",
     "react": "19.1.0",
-    "react-native": "0.81.5"
+    "react-native": "0.81.5",
+    "react-native-safe-area-context": "~5.6.2"
   },
   "devDependencies": {
     "@types/react": "~19.1.0",

@@ -60,8 +60,10 @@ public class KeyboardComposerModule: Module {
     }
 
     // Second view in module - keyboard-aware wrapper
+    // Auto-named as "KeyboardComposer_KeyboardAwareWrapper"
     View(KeyboardAwareWrapper.self) {
       Prop("extraBottomInset") { (view: KeyboardAwareWrapper, value: CGFloat) in
+        print("🎯 [Native] Received extraBottomInset prop: \(value)")
         view.extraBottomInset = value
       }
       

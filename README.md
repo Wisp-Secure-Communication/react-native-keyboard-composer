@@ -14,6 +14,8 @@ A native keyboard-aware composer component for React Native with smooth keyboard
 ## Installation
 
 ```bash
+pnpm add @launchhq/react-native-keyboard-composer
+# or
 npm install @launchhq/react-native-keyboard-composer
 # or
 yarn add @launchhq/react-native-keyboard-composer
@@ -141,6 +143,66 @@ import { constants } from "@launchhq/react-native-keyboard-composer";
 console.log(constants.defaultMinHeight); // 48
 console.log(constants.defaultMaxHeight); // 120
 console.log(constants.contentGap); // 32
+```
+
+## Styling & Customization
+
+### Built-in Spacing
+
+The library automatically handles spacing between your content and the composer:
+
+| Constant                | iOS (pt) | Android (dp) | Description                           |
+| ----------------------- | -------- | ------------ | ------------------------------------- |
+| `CONTENT_GAP`           | 24       | 24           | Gap between last message and composer |
+| `COMPOSER_KEYBOARD_GAP` | 8        | 8            | Gap between composer and keyboard     |
+
+> **Note:** While both platforms use the same numerical values, the visual spacing may appear different due to how each platform handles safe areas, scroll content insets, and keyboard positioning. iOS typically shows more visible gap due to its safe area and scroll inset calculations.
+
+### Adding Extra Spacing
+
+If you need more space between your content and the composer, add `paddingBottom` to your scroll content:
+
+```tsx
+<ScrollView
+  contentContainerStyle={{
+    paddingBottom: 16, // Extra space above composer
+  }}
+>
+  {/* Your messages */}
+</ScrollView>
+```
+
+### Composer Container Styling
+
+The `KeyboardComposer` should be placed inside `KeyboardAwareWrapper` with absolute positioning for proper keyboard animation:
+
+```tsx
+<KeyboardAwareWrapper style={{ flex: 1 }} extraBottomInset={composerHeight}>
+  <ScrollView>{/* Content */}</ScrollView>
+
+  {/* Composer - positioned absolutely, animated by native code */}
+  <View style={styles.composerContainer}>
+    <View style={[styles.composerWrapper, { height: composerHeight }]}>
+      <KeyboardComposer ... />
+    </View>
+  </View>
+</KeyboardAwareWrapper>
+
+const styles = StyleSheet.create({
+  composerContainer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 16,
+    paddingBottom: 16, // Or use safe area insets
+  },
+  composerWrapper: {
+    borderRadius: 24,
+    backgroundColor: '#F2F2F7',
+    overflow: 'hidden',
+  },
+});
 ```
 
 ## How It Works

@@ -1,5 +1,5 @@
 import { requireNativeView } from "expo";
-import { forwardRef, useCallback, useImperativeHandle, useRef } from "react";
+import { forwardRef, useCallback, useImperativeHandle } from "react";
 
 import type {
   KeyboardComposerProps,
@@ -32,86 +32,83 @@ const KeyboardComposerView = forwardRef<
   KeyboardComposerRef,
   KeyboardComposerProps
 >((props, ref) => {
-  const {
-    onChangeText,
-    onSend,
-    onStop,
-    onHeightChange,
-    onKeyboardHeightChange,
-    onComposerFocus,
-    onComposerBlur,
-    ...rest
-  } = props;
+    const {
+      onChangeText,
+      onSend,
+      onStop,
+      onHeightChange,
+      onKeyboardHeightChange,
+      onComposerFocus,
+      onComposerBlur,
+      ...rest
+    } = props;
 
-  const nativeRef = useRef<any>(null);
+  // Expose methods to parent via ref (placeholder for future native method support)
+    useImperativeHandle(ref, () => ({
+      focus: () => {
+      // TODO: Call native focus method
+      },
+      blur: () => {
+      // TODO: Call native blur method
+      },
+      clear: () => {
+      // TODO: Call native clear method
+      },
+    }));
 
-  // Expose methods to parent via ref
-  useImperativeHandle(ref, () => ({
-    focus: () => {
-      // Native focus method would be called here
-    },
-    blur: () => {
-      // Native blur method would be called here
-    },
-    clear: () => {
-      // Native clear method would be called here
-    },
-  }));
+    // Event handlers that unwrap nativeEvent
+    const handleChangeText = useCallback(
+      (event: { nativeEvent: TextEventPayload }) => {
+        onChangeText?.(event.nativeEvent.text);
+      },
+      [onChangeText]
+    );
 
-  // Event handlers that unwrap nativeEvent
-  const handleChangeText = useCallback(
-    (event: { nativeEvent: TextEventPayload }) => {
-      onChangeText?.(event.nativeEvent.text);
-    },
-    [onChangeText]
-  );
+    const handleSend = useCallback(
+      (event: { nativeEvent: TextEventPayload }) => {
+        onSend?.(event.nativeEvent.text);
+      },
+      [onSend]
+    );
 
-  const handleSend = useCallback(
-    (event: { nativeEvent: TextEventPayload }) => {
-      onSend?.(event.nativeEvent.text);
-    },
-    [onSend]
-  );
+    const handleStop = useCallback(() => {
+      onStop?.();
+    }, [onStop]);
 
-  const handleStop = useCallback(() => {
-    onStop?.();
-  }, [onStop]);
+    const handleHeightChange = useCallback(
+      (event: { nativeEvent: HeightEventPayload }) => {
+        onHeightChange?.(event.nativeEvent.height);
+      },
+      [onHeightChange]
+    );
 
-  const handleHeightChange = useCallback(
-    (event: { nativeEvent: HeightEventPayload }) => {
-      onHeightChange?.(event.nativeEvent.height);
-    },
-    [onHeightChange]
-  );
+    const handleKeyboardHeightChange = useCallback(
+      (event: { nativeEvent: HeightEventPayload }) => {
+        onKeyboardHeightChange?.(event.nativeEvent.height);
+      },
+      [onKeyboardHeightChange]
+    );
 
-  const handleKeyboardHeightChange = useCallback(
-    (event: { nativeEvent: HeightEventPayload }) => {
-      onKeyboardHeightChange?.(event.nativeEvent.height);
-    },
-    [onKeyboardHeightChange]
-  );
+    const handleComposerFocus = useCallback(() => {
+      onComposerFocus?.();
+    }, [onComposerFocus]);
 
-  const handleComposerFocus = useCallback(() => {
-    onComposerFocus?.();
-  }, [onComposerFocus]);
+    const handleComposerBlur = useCallback(() => {
+      onComposerBlur?.();
+    }, [onComposerBlur]);
 
-  const handleComposerBlur = useCallback(() => {
-    onComposerBlur?.();
-  }, [onComposerBlur]);
-
-  return (
-    <NativeView
-      ref={nativeRef}
-      onChangeText={handleChangeText}
-      onSend={handleSend}
-      onStop={handleStop}
-      onHeightChange={handleHeightChange}
-      onKeyboardHeightChange={handleKeyboardHeightChange}
-      onComposerFocus={handleComposerFocus}
-      onComposerBlur={handleComposerBlur}
-      {...rest}
-    />
-  );
+    return (
+      <NativeView
+        onChangeText={handleChangeText}
+        onSend={handleSend}
+        onStop={handleStop}
+        onHeightChange={handleHeightChange}
+        onKeyboardHeightChange={handleKeyboardHeightChange}
+        onComposerFocus={handleComposerFocus}
+        onComposerBlur={handleComposerBlur}
+        {...rest}
+      />
+    );
 });
 
 KeyboardComposerView.displayName = "KeyboardComposerView";
