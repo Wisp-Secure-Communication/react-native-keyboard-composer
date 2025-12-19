@@ -280,13 +280,8 @@ function ChatScreen() {
         </ScrollView>
 
         {/* Composer - positioned absolutely, animated by native code */}
-        <View
-          style={[
-            styles.composerContainer,
-            { paddingBottom: Math.max(insets.bottom, 16) },
-          ]}
-          pointerEvents="box-none"
-        >
+        {/* Note: Safe area padding is handled natively by KeyboardAwareWrapper */}
+        <View style={styles.composerContainer} pointerEvents="box-none">
           <View
             style={[
               styles.composerInner,

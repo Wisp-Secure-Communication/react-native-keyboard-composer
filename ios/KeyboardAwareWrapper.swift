@@ -23,6 +23,7 @@ class KeyboardAwareWrapper: ExpoView, KeyboardAwareScrollHandlerDelegate {
     // Constants matching Android
     private let CONTENT_GAP: CGFloat = 24
     private let COMPOSER_KEYBOARD_GAP: CGFloat = 10
+    private let MIN_BOTTOM_PADDING: CGFloat = 16  // Minimum padding when keyboard closed
     
     // KVO observations
     private var extraBottomInsetObservation: NSKeyValueObservation?
@@ -186,16 +187,18 @@ class KeyboardAwareWrapper: ExpoView, KeyboardAwareScrollHandlerDelegate {
             return
         }
         
-        // Calculate effective keyboard height (above safe area)
-        let effectiveKeyboard = max(currentKeyboardHeight - safeAreaBottom, 0)
-        
-        // Only translate when keyboard is open
-        // When closed, React Native handles positioning via paddingBottom
+        // Native code handles ALL positioning:
+        // - When keyboard closed: move up by safe area (or min padding)
+        // - When keyboard open: move up by FULL keyboard height + gap
         let translation: CGFloat
-        if effectiveKeyboard > 0 {
-            translation = -(effectiveKeyboard + COMPOSER_KEYBOARD_GAP)
+        if currentKeyboardHeight > 0 {
+            // Keyboard open - position above keyboard using FULL keyboard height
+            // (not effectiveKeyboard, since we no longer have JS paddingBottom)
+            translation = -(currentKeyboardHeight + COMPOSER_KEYBOARD_GAP)
         } else {
-            translation = 0
+            // Keyboard closed - position above safe area
+            let bottomOffset = max(safeAreaBottom, MIN_BOTTOM_PADDING)
+            translation = -bottomOffset
         }
         
         // Check if transform is already correct to avoid unnecessary updates
@@ -252,9 +255,12 @@ class KeyboardAwareWrapper: ExpoView, KeyboardAwareScrollHandlerDelegate {
     /// Base button offset (when keyboard is closed) - used for constraint
     private func calculateBaseButtonOffset() -> CGFloat {
         let composerHeight = lastComposerHeight > 0 ? lastComposerHeight : extraBottomInset
-        // Button sits just above the composer (small gap, not the full CONTENT_GAP)
-        let buttonGap: CGFloat = 8  // Same as COMPOSER_KEYBOARD_GAP
-        return safeAreaBottom + composerHeight + buttonGap
+        // Button sits just above the composer
+        // Since composer is transformed up by (safeAreaBottom or minPadding), 
+        // button needs same offset + composer height + gap
+        let bottomOffset = max(safeAreaBottom, MIN_BOTTOM_PADDING)
+        let buttonGap: CGFloat = 8
+        return bottomOffset + composerHeight + buttonGap
     }
     
     /// Update button transform to animate with keyboard (called inside animation block)
