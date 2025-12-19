@@ -4,7 +4,9 @@ A native keyboard-aware composer for React Native chat applications. Built speci
 
 ## Demo
 
-[![Demo](https://img.youtube.com/vi/BOWPD1xi1no/maxresdefault.jpg)](https://www.youtube.com/watch?v=BOWPD1xi1no)
+<a href="https://www.youtube.com/watch?v=BOWPD1xi1no" target="_blank">
+  <img src="https://img.youtube.com/vi/BOWPD1xi1no/maxresdefault.jpg" alt="Demo" width="600" />
+</a>
 
 _Click to watch demo · Smooth keyboard animations with auto-growing input and content-aware positioning._
 
