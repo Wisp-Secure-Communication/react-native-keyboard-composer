@@ -5,7 +5,7 @@ A native keyboard-aware composer for React Native chat applications. Built speci
 ## Demo
 
 <p align="center">
-  <video src="https://github.com/launchtodayhq/react-native-keyboard-composer/raw/main/demo/ios.mp4" width="300" autoplay loop muted playsinline></video>
+  <video src="https://github.com/launchtodayhq/react-native-keyboard-composer/blob/main/demo/ios.mp4" width="300" autoplay loop muted playsinline></video>
 </p>
 
 > _Smooth keyboard animations with auto-growing input, scroll-to-bottom button, and content-aware positioning._
