@@ -29,6 +29,7 @@ This library solves all of that with native implementations that handle the edge
 - 📱 **iOS & Android parity** - Same behavior on both platforms
 - 🎛️ **Streaming support** - Built-in stop button for AI streaming responses
 - 🌙 **Dark mode support** - Automatically adapts to system theme
+- 👆 **Gesture support (iOS)** - Swipe down to dismiss keyboard, swipe up to open
 
 ## Installation
 
