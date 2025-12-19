@@ -115,6 +115,11 @@ class KeyboardComposerView: ExpoView {
     textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     textView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
     containerView.addSubview(textView)
+    
+    // Swipe down gesture to dismiss keyboard
+    let swipeDown = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipeDown))
+    swipeDown.direction = .down
+    textView.addGestureRecognizer(swipeDown)
 
     // Placeholder
     placeholderLabel.text = placeholder
@@ -332,6 +337,11 @@ class KeyboardComposerView: ExpoView {
     sendButton.alpha = sendButton.isEnabled ? 1.0 : 0.4
   }
 
+  // MARK: - Gestures
+  @objc private func handleSwipeDown() {
+    textView.resignFirstResponder()
+  }
+  
   // MARK: - Public methods for JS
   func focus() {
     textView.becomeFirstResponder()

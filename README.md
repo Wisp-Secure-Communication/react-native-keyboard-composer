@@ -244,6 +244,126 @@ The library handles three key scenarios:
 - iOS 15+
 - Android API 21+
 
+## Development
+
+### Local Development Setup
+
+To test this package locally in another project before publishing:
+
+#### 1. Add the package to your workspace
+
+In your consuming project's `pnpm-workspace.yaml`, add the path to this package:
+
+```yaml
+packages:
+  - apps/*
+  - ../react-native-keyboard-composer # Adjust path as needed
+```
+
+#### 2. Use workspace protocol in package.json
+
+In the consuming app's `package.json`:
+
+```json
+{
+  "dependencies": {
+    "@launchhq/react-native-keyboard-composer": "workspace:*"
+  }
+}
+```
+
+#### 3. Configure Metro to watch the external package
+
+In your app's `metro.config.js`:
+
+```js
+const path = require("path");
+const { getDefaultConfig } = require("expo/metro-config");
+
+const config = getDefaultConfig(__dirname);
+
+// Path to the local package
+const keyboardComposerPath = path.resolve(
+  __dirname,
+  "../../../react-native-keyboard-composer" // Adjust path as needed
+);
+
+// Watch the external package folder for changes
+config.watchFolders = [keyboardComposerPath];
+
+// Map the package name to the local path
+config.resolver.extraNodeModules = {
+  "@launchhq/react-native-keyboard-composer": keyboardComposerPath,
+};
+
+module.exports = config;
+```
+
+#### 4. Install dependencies
+
+```bash
+pnpm install
+```
+
+Now any changes to the package will be reflected immediately in your app.
+
+### Publishing to npm
+
+When you're ready to publish:
+
+#### 1. Build and publish the package
+
+```bash
+cd react-native-keyboard-composer
+pnpm run build
+npm publish --access public
+```
+
+#### 2. Update consuming apps to use the published version
+
+In the consuming app's `package.json`, change:
+
+```json
+{
+  "dependencies": {
+    // From:
+    "@launchhq/react-native-keyboard-composer": "workspace:*"
+
+    // To:
+    "@launchhq/react-native-keyboard-composer": "^0.1.0"
+  }
+}
+```
+
+#### 3. Clean up workspace config (optional)
+
+Remove the package from `pnpm-workspace.yaml`:
+
+```yaml
+packages:
+  - apps/*
+  # Remove: - ../react-native-keyboard-composer
+```
+
+#### 4. Reinstall dependencies
+
+```bash
+pnpm install
+```
+
+### Quick Toggle Scripts (Optional)
+
+Add these scripts to your consuming app's `package.json` for easy switching:
+
+```json
+{
+  "scripts": {
+    "use-local-keyboard": "pnpm pkg set dependencies.@launchhq/react-native-keyboard-composer=workspace:* && pnpm install",
+    "use-published-keyboard": "pnpm pkg set dependencies.@launchhq/react-native-keyboard-composer=^0.1.0 && pnpm install"
+  }
+}
+```
+
 ## Contributing
 
 Contributions are welcome! Please read our contributing guidelines before submitting a PR.
