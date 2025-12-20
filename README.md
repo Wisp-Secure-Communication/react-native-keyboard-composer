@@ -276,31 +276,27 @@ These gestures provide a natural way to control the keyboard without reaching fo
 
 ### Local Development Setup
 
-To test this package locally in another project before publishing:
+To test this package locally in another project before it's published to npm:
 
-#### 1. Add the package to your workspace
+---
 
-In your consuming project's `pnpm-workspace.yaml`, add the path to this package:
+#### Option A: Using npm/yarn (Simple)
 
-```yaml
-packages:
-  - apps/*
-  - ../react-native-keyboard-composer # Adjust path as needed
-```
+This approach works with any package manager and doesn't require workspaces.
 
-#### 2. Use workspace protocol in package.json
-
-In the consuming app's `package.json`:
+**1. Link to the local package in your `package.json`:**
 
 ```json
 {
   "dependencies": {
-    "@launchhq/react-native-keyboard-composer": "workspace:*"
+    "@launchhq/react-native-keyboard-composer": "file:../react-native-keyboard-composer"
   }
 }
 ```
 
-#### 3. Configure Metro to watch the external package
+> Adjust the path to point to where you cloned the package.
+
+**2. Configure Metro to watch the external package:**
 
 In your app's `metro.config.js`:
 
@@ -313,7 +309,7 @@ const config = getDefaultConfig(__dirname);
 // Path to the local package
 const keyboardComposerPath = path.resolve(
   __dirname,
-  "../../../react-native-keyboard-composer" // Adjust path as needed
+  "../react-native-keyboard-composer" // Adjust path as needed
 );
 
 // Watch the external package folder for changes
@@ -327,7 +323,54 @@ config.resolver.extraNodeModules = {
 module.exports = config;
 ```
 
-#### 4. Install dependencies
+**3. Install dependencies:**
+
+```bash
+npm install
+# or
+yarn install
+```
+
+**4. Rebuild native code (required for native modules):**
+
+```bash
+npx expo prebuild --clean
+npx expo run:ios
+# or
+npx expo run:android
+```
+
+Now any changes to the package will be reflected immediately in your app.
+
+---
+
+#### Option B: Using pnpm Workspaces (Monorepo)
+
+If you're using pnpm workspaces in a monorepo setup:
+
+**1. Add the package to your workspace:**
+
+In your project's `pnpm-workspace.yaml`:
+
+```yaml
+packages:
+  - apps/*
+  - ../react-native-keyboard-composer # Adjust path as needed
+```
+
+**2. Use workspace protocol in `package.json`:**
+
+```json
+{
+  "dependencies": {
+    "@launchhq/react-native-keyboard-composer": "workspace:*"
+  }
+}
+```
+
+**3. Configure Metro** (same as Option A step 2 above)
+
+**4. Install dependencies:**
 
 ```bash
 pnpm install
