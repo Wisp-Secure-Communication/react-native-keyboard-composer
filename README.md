@@ -1,5 +1,13 @@
 # @launchhq/react-native-keyboard-composer
 
+> ⚠️ **Beta - Work In Progress**
+>
+> This package is currently in beta and will be published to npm soon. The API may change without notice.
+>
+> **To use this package now**, follow the [Local Development Setup](#local-development-setup) instructions below to link it to your project.
+
+---
+
 A native keyboard-aware composer for React Native chat applications. Built specifically for AI chat interfaces like ChatGPT and v0, where content needs to react intelligently to keyboard and input changes.
 
 ## Demo
