@@ -24,8 +24,8 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
     /// Maximum reserve space (prevents excessive empty space)
     private let maxReserveInset: CGFloat = 520
     
-    /// Top padding when pinning message
-    private let pinTopPadding: CGFloat = 16
+    /// Top padding when pinning message (small value to hide previous messages)
+    private let pinTopPadding: CGFloat = 8
     
     /// Flag: pin-to-top is pending, waiting for content to be added
     private var pendingPinToTop = false
@@ -429,33 +429,35 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
         scrollView.setNeedsLayout()
         scrollView.layoutIfNeeded()
         
-        // Find the last message
-        guard let contentView = scrollView.subviews.first,
-              let lastMessageView = findLastMessageView(in: contentView) else {
-            NSLog("[KeyboardAwareScrollHandler] performPinAnimation: no message view found")
-            return
-        }
-        
-        // Measurements
+        // Use the content size at pin request as the scroll target
+        // This scrolls to where the NEW content starts (hiding all previous messages)
         let viewportHeight = scrollView.bounds.height
         let topInset = scrollView.adjustedContentInset.top
-        let messageHeight = lastMessageView.bounds.height
-        let messageFrameInContent = lastMessageView.convert(lastMessageView.bounds, to: contentView)
         
-        NSLog("[KeyboardAwareScrollHandler] performPinAnimation: viewport=%.0f msgH=%.0f msgY=%.0f", 
-              viewportHeight, messageHeight, messageFrameInContent.minY)
+        // The new message starts at approximately the old content height
+        // Subtract a small padding to ensure we're scrolled past previous content
+        let messageGap: CGFloat = 16  // Gap between messages in the UI
+        let targetOffset = contentSizeAtPinRequest.height - messageGap
+        let clampedOffset = max(-topInset, targetOffset)
         
-        // Calculate reserve space
+        NSLog("[KeyboardAwareScrollHandler] performPinAnimation: viewport=%.0f oldContentH=%.0f targetOffset=%.0f", 
+              viewportHeight, contentSizeAtPinRequest.height, clampedOffset)
+        
+        // Find the new message to calculate reserve (for runway space)
+        var messageHeight: CGFloat = 60  // Default estimate
+        if let contentView = scrollView.subviews.first,
+           let userMessageView = findUserMessageToPin(in: contentView) {
+            messageHeight = userMessageView.bounds.height
+            NSLog("[KeyboardAwareScrollHandler] performPinAnimation: found message H=%.0f", messageHeight)
+        }
+        
+        // Calculate reserve space for streaming response
         let typingIndicatorHeight: CGFloat = 32
         let bottomBuffer: CGFloat = 16
         var reserve = viewportHeight - pinTopPadding - messageHeight - typingIndicatorHeight - bottomBuffer
         reserve = max(0, min(reserve, maxReserveInset))
         
-        // Calculate target scroll offset
-        let targetOffset = messageFrameInContent.minY - pinTopPadding
-        let clampedOffset = max(-topInset, targetOffset)
-        
-        NSLog("[KeyboardAwareScrollHandler] performPinAnimation: reserve=%.0f offset=%.0f", reserve, clampedOffset)
+        NSLog("[KeyboardAwareScrollHandler] performPinAnimation: reserve=%.0f", reserve)
         
         // Apply reserve
         responseReserveInset = reserve
@@ -601,6 +603,61 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
         }
         
         return sorted.last
+    }
+    
+    /// Find the user's message to pin (second-to-last message CONTAINER).
+    /// When streaming starts, the AI response becomes the "last" message,
+    /// but we want to pin the user's message (second-to-last).
+    /// Only counts container views, not paragraph/text views inside them.
+    private func findUserMessageToPin(in contentView: UIView) -> UIView? {
+        let contentWidth = contentView.bounds.width
+        let contentHeight = contentView.bounds.height
+        
+        func findMessageContainers(in view: UIView, depth: Int = 0) -> [UIView] {
+            var messages: [UIView] = []
+            
+            for subview in view.subviews {
+                let frame = subview.frame
+                guard !subview.isHidden else { continue }
+                
+                let className = String(describing: type(of: subview))
+                
+                // Skip scroll indicators
+                if className.contains("ScrollIndicator") { continue }
+                
+                // Skip paragraph/text views - we only want container views
+                if className.contains("Paragraph") || className.contains("Text") { continue }
+                
+                let isAtOrigin = frame.origin.x == 0 && frame.origin.y == 0
+                let isFullWidth = abs(frame.width - contentWidth) < 10
+                let isFullHeight = abs(frame.height - contentHeight) < 10
+                let hasReasonableSize = frame.height > 20 && frame.width > 40
+                
+                if !isAtOrigin && !isFullWidth && !isFullHeight && hasReasonableSize {
+                    // This is a message container
+                    messages.append(subview)
+                } else if depth < 2 {
+                    messages.append(contentsOf: findMessageContainers(in: subview, depth: depth + 1))
+                }
+            }
+            
+            return messages
+        }
+        
+        let candidateViews = findMessageContainers(in: contentView)
+        let sorted = candidateViews.sorted { $0.frame.maxY < $1.frame.maxY }
+        
+        NSLog("[KeyboardAwareScrollHandler] findUserMessageToPin: found %d message CONTAINERS", sorted.count)
+        
+        // Select the LAST message (user's message)
+        // The AI response hasn't been added yet when this runs
+        if let last = sorted.last {
+            NSLog("[KeyboardAwareScrollHandler] findUserMessageToPin: selected LAST container at Y=%.0f H=%.0f", 
+                  last.frame.origin.y, last.frame.height)
+            return last
+        }
+        
+        return nil
     }
     
     /// Gradually reduce reserve as content fills in (call during streaming)
