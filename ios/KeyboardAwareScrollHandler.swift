@@ -422,47 +422,52 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
     }
     
     /// Perform the actual pin-to-top animation (no delays, called when ready)
+    /// Uses VIEW-ANCHORED approach: pins to actual user bubble position, not contentSize
     private func performPinAnimation() {
         guard let scrollView = scrollView else { return }
         
-        // Force layout
         scrollView.setNeedsLayout()
         scrollView.layoutIfNeeded()
         
-        // Use the content size at pin request as the scroll target
-        // This scrolls to where the NEW content starts (hiding all previous messages)
-        let viewportHeight = scrollView.bounds.height
+        let viewportH = scrollView.bounds.height
         let topInset = scrollView.adjustedContentInset.top
         
-        // The new message starts at approximately the old content height
-        // Subtract a small padding to ensure we're scrolled past previous content
-        let messageGap: CGFloat = 16  // Gap between messages in the UI
-        let targetOffset = contentSizeAtPinRequest.height - messageGap
-        let clampedOffset = max(-topInset, targetOffset)
+        // Find RN content view more reliably than subviews.first
+        let contentView = scrollView.subviews.max(by: { $0.bounds.height < $1.bounds.height }) ?? scrollView
         
-        NSLog("[KeyboardAwareScrollHandler] performPinAnimation: viewport=%.0f oldContentH=%.0f targetOffset=%.0f", 
-              viewportHeight, contentSizeAtPinRequest.height, clampedOffset)
-        
-        // Find the new message to calculate reserve (for runway space)
-        var messageHeight: CGFloat = 60  // Default estimate
-        if let contentView = scrollView.subviews.first,
-           let userMessageView = findUserMessageToPin(in: contentView) {
-            messageHeight = userMessageView.bounds.height
-            NSLog("[KeyboardAwareScrollHandler] performPinAnimation: found message H=%.0f", messageHeight)
+        // Find the latest USER bubble to pin (right aligned)
+        guard let userBubble = findLatestUserBubble(in: contentView) else {
+            NSLog("[Pin] Could not find user bubble")
+            return
         }
         
-        // Calculate reserve space for streaming response
-        let typingIndicatorHeight: CGFloat = 32
+        let messageH = userBubble.bounds.height
+        
+        // Compute runway dynamically (viewport-based, not fixed cap)
+        let typingIndicatorH: CGFloat = 32
         let bottomBuffer: CGFloat = 16
-        var reserve = viewportHeight - pinTopPadding - messageHeight - typingIndicatorHeight - bottomBuffer
-        reserve = max(0, min(reserve, maxReserveInset))
         
-        NSLog("[KeyboardAwareScrollHandler] performPinAnimation: reserve=%.0f", reserve)
+        // Visible area below the pinned message
+        var reserve = (viewportH - topInset) - (pinTopPadding + messageH + typingIndicatorH + bottomBuffer)
+        reserve = max(0, reserve)
         
-        // Apply reserve
+        // Cap to viewport height instead of fixed 520
+        reserve = min(reserve, viewportH)
+        
         responseReserveInset = reserve
+        updateContentInset()
         
-        // Animate with critically damped spring (no bounce, just smooth)
+        // Pin the bubble to the top (view-anchored, not contentSize-anchored)
+        let targetY = userBubble.frame.minY - topInset - pinTopPadding
+        
+        // Clamp using the NEW bottom inset (includes reserve)
+        let contentH = scrollView.contentSize.height
+        let maxOffset = max(-topInset, contentH - viewportH + scrollView.contentInset.bottom)
+        let clampedY = max(-topInset, min(targetY, maxOffset))
+        
+        NSLog("[Pin] viewport=%.0f msgH=%.0f msgY=%.0f reserve=%.0f targetY=%.0f", 
+              viewportH, messageH, userBubble.frame.minY, reserve, clampedY)
+        
         UIView.animate(
             withDuration: 0.4,
             delay: 0,
@@ -471,8 +476,46 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
             options: [.curveEaseOut, .allowUserInteraction]
         ) {
             self.updateContentInset()
-            scrollView.contentOffset = CGPoint(x: 0, y: clampedOffset)
+            scrollView.contentOffset = CGPoint(x: 0, y: clampedY)
         }
+    }
+    
+    /// Picks the newest right-aligned "user bubble" view.
+    /// User messages are right-aligned, assistant messages are left-aligned.
+    /// This avoids brittle "second to last" assumptions and works across screen sizes.
+    private func findLatestUserBubble(in contentView: UIView) -> UIView? {
+        let contentWidth = contentView.bounds.width
+        
+        func collectCandidates(in view: UIView, depth: Int = 0) -> [UIView] {
+            var out: [UIView] = []
+            for sub in view.subviews {
+                guard !sub.isHidden, sub.alpha > 0.01 else { continue }
+                
+                let cls = String(describing: type(of: sub))
+                if cls.contains("ScrollIndicator") { continue }
+                if cls.contains("Paragraph") || cls.contains("Text") { continue }
+                
+                let f = sub.frame
+                let reasonable = f.height > 20 && f.width > 40
+                let fullWidth = abs(f.width - contentWidth) < 10
+                if reasonable && !fullWidth {
+                    out.append(sub)
+                } else if depth < 2 {
+                    out.append(contentsOf: collectCandidates(in: sub, depth: depth + 1))
+                }
+            }
+            return out
+        }
+        
+        let candidates = collectCandidates(in: contentView)
+            .sorted { $0.frame.maxY < $1.frame.maxY }
+        
+        // Heuristic: user bubbles are right aligned (maxX close to content width)
+        let rightAligned = candidates.filter { ($0.frame.maxX / max(contentWidth, 1)) > 0.80 }
+        
+        NSLog("[Pin] Found %d candidates, %d right-aligned", candidates.count, rightAligned.count)
+        
+        return rightAligned.last ?? candidates.last
     }
     
     /// Debug helper to print view hierarchy
