@@ -18,6 +18,24 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
     private var isAtBottom = true
     private var isKeyboardVisible = false  // Track if keyboard is already showing
     
+    /// Extra inset reserved for streaming response (ChatGPT-style runway)
+    private var responseReserveInset: CGFloat = 0
+    
+    /// Maximum reserve space (prevents excessive empty space)
+    private let maxReserveInset: CGFloat = 520
+    
+    /// Top padding when pinning message
+    private let pinTopPadding: CGFloat = 16
+    
+    /// Flag: pin-to-top is pending, waiting for content to be added
+    private var pendingPinToTop = false
+    
+    /// Content size when pin was requested (to detect new content)
+    private var contentSizeAtPinRequest: CGSize = .zero
+    
+    /// Flag: waiting for keyboard to hide before pinning
+    private var waitingForKeyboardHide = false
+    
     /// Get safe area bottom from window
     private var safeAreaBottom: CGFloat {
         scrollView?.window?.safeAreaInsets.bottom ?? 34
@@ -48,6 +66,23 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
             name: UIResponder.keyboardWillHideNotification,
             object: nil
         )
+        
+        // Also observe keyboardDidHide to know when keyboard is fully hidden
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(keyboardDidHide(_:)),
+            name: UIResponder.keyboardDidHideNotification,
+            object: nil
+        )
+    }
+    
+    @objc private func keyboardDidHide(_ notification: Notification) {
+        // If we were waiting for keyboard to hide before pinning, now we can proceed
+        if waitingForKeyboardHide && pendingPinToTop {
+            waitingForKeyboardHide = false
+            NSLog("[KeyboardAwareScrollHandler] keyboardDidHide: now checking if content is ready for pin")
+            checkAndPerformPinToTop()
+        }
     }
     
     @objc private func keyboardWillShow(_ notification: Notification) {
@@ -143,11 +178,11 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
         
         let totalInset: CGFloat
         if keyboardHeight > 0 {
-            // Keyboard open: base + keyboard + small padding
-            totalInset = baseBottomInset + keyboardHeight + keyboardOpenPadding
+            // Keyboard open: base + keyboard + small padding + reserve
+            totalInset = baseBottomInset + keyboardHeight + keyboardOpenPadding + responseReserveInset
         } else {
-            // Keyboard closed: base + safe area
-            totalInset = baseBottomInset + safeAreaBottom
+            // Keyboard closed: base + safe area + reserve
+            totalInset = baseBottomInset + safeAreaBottom + responseReserveInset
         }
         
         scrollView.contentInset.bottom = totalInset
@@ -190,6 +225,18 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
         // Observe content size changes
         contentSizeObservation = scrollView.observe(\.contentSize, options: [.new, .old]) { [weak self] scrollView, change in
             guard let self = self else { return }
+            
+            // Check if content size increased (new content added)
+            if let oldSize = change.oldValue, let newSize = change.newValue {
+                let contentIncreased = newSize.height > oldSize.height
+                
+                // If we're pending pin-to-top and content was added, check if ready
+                if contentIncreased && self.pendingPinToTop {
+                    NSLog("[KeyboardAwareScrollHandler] contentSize increased: %.0f -> %.0f, checking pin conditions", oldSize.height, newSize.height)
+                    self.checkAndPerformPinToTop()
+                }
+            }
+            
             // Check position when content size changes
             DispatchQueue.main.async {
                 self.checkAndUpdateScrollPosition()
@@ -315,6 +362,263 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
             UIView.animate(withDuration: 0.3, delay: 0, options: .curveEaseOut) {
                 scrollView.contentOffset = CGPoint(x: 0, y: offset)
             }
+        }
+    }
+    
+    // MARK: - ChatGPT-style Pin to Top with Runway
+    
+    /// Request pin-to-top. Uses event-driven approach:
+    /// 1. Waits for keyboard to hide (via keyboardDidHide notification)
+    /// 2. Waits for new content (via contentSize KVO)
+    /// Then performs the animation when both conditions are met.
+    func pinLatestMessageToTop() {
+        NSLog("[KeyboardAwareScrollHandler] *** pinLatestMessageToTop requested ***")
+        
+        guard let scrollView = scrollView else {
+            NSLog("[KeyboardAwareScrollHandler] pinLatestMessageToTop: no scrollView")
+            return
+        }
+        
+        // Set flags for event-driven triggering
+        pendingPinToTop = true
+        contentSizeAtPinRequest = scrollView.contentSize
+        
+        // Check if keyboard is visible
+        if isKeyboardVisible {
+            NSLog("[KeyboardAwareScrollHandler] pinLatestMessageToTop: keyboard visible, waiting for keyboardDidHide")
+            waitingForKeyboardHide = true
+        } else {
+            // Keyboard already hidden, check if content is ready
+            waitingForKeyboardHide = false
+            checkAndPerformPinToTop()
+        }
+    }
+    
+    /// Check if all conditions are met to perform pin-to-top.
+    /// Called when: contentSize increases OR keyboard did hide
+    private func checkAndPerformPinToTop() {
+        guard pendingPinToTop else { return }
+        guard let scrollView = scrollView else { return }
+        
+        // Condition 1: Keyboard must be hidden
+        if isKeyboardVisible {
+            NSLog("[KeyboardAwareScrollHandler] checkAndPerformPinToTop: keyboard still visible")
+            return
+        }
+        
+        // Condition 2: New content must be added
+        let currentContentSize = scrollView.contentSize
+        if currentContentSize.height <= contentSizeAtPinRequest.height {
+            NSLog("[KeyboardAwareScrollHandler] checkAndPerformPinToTop: waiting for content (%.0f <= %.0f)", 
+                  currentContentSize.height, contentSizeAtPinRequest.height)
+            return
+        }
+        
+        // All conditions met!
+        NSLog("[KeyboardAwareScrollHandler] checkAndPerformPinToTop: all conditions met, performing animation")
+        pendingPinToTop = false
+        waitingForKeyboardHide = false
+        performPinAnimation()
+    }
+    
+    /// Perform the actual pin-to-top animation (no delays, called when ready)
+    private func performPinAnimation() {
+        guard let scrollView = scrollView else { return }
+        
+        // Force layout
+        scrollView.setNeedsLayout()
+        scrollView.layoutIfNeeded()
+        
+        // Find the last message
+        guard let contentView = scrollView.subviews.first,
+              let lastMessageView = findLastMessageView(in: contentView) else {
+            NSLog("[KeyboardAwareScrollHandler] performPinAnimation: no message view found")
+            return
+        }
+        
+        // Measurements
+        let viewportHeight = scrollView.bounds.height
+        let topInset = scrollView.adjustedContentInset.top
+        let messageHeight = lastMessageView.bounds.height
+        let messageFrameInContent = lastMessageView.convert(lastMessageView.bounds, to: contentView)
+        
+        NSLog("[KeyboardAwareScrollHandler] performPinAnimation: viewport=%.0f msgH=%.0f msgY=%.0f", 
+              viewportHeight, messageHeight, messageFrameInContent.minY)
+        
+        // Calculate reserve space
+        let typingIndicatorHeight: CGFloat = 32
+        let bottomBuffer: CGFloat = 16
+        var reserve = viewportHeight - pinTopPadding - messageHeight - typingIndicatorHeight - bottomBuffer
+        reserve = max(0, min(reserve, maxReserveInset))
+        
+        // Calculate target scroll offset
+        let targetOffset = messageFrameInContent.minY - pinTopPadding
+        let clampedOffset = max(-topInset, targetOffset)
+        
+        NSLog("[KeyboardAwareScrollHandler] performPinAnimation: reserve=%.0f offset=%.0f", reserve, clampedOffset)
+        
+        // Apply reserve
+        responseReserveInset = reserve
+        
+        // Animate with critically damped spring (no bounce, just smooth)
+        UIView.animate(
+            withDuration: 0.4,
+            delay: 0,
+            usingSpringWithDamping: 1.0,
+            initialSpringVelocity: 0,
+            options: [.curveEaseOut, .allowUserInteraction]
+        ) {
+            self.updateContentInset()
+            scrollView.contentOffset = CGPoint(x: 0, y: clampedOffset)
+        }
+    }
+    
+    /// Debug helper to print view hierarchy
+    private func debugPrintViewHierarchy(_ view: UIView, indent: Int = 0) {
+        let indentStr = String(repeating: "  ", count: indent)
+        let typeName = String(describing: type(of: view))
+        NSLog("%@%@ frame=%@ hidden=%@", indentStr, typeName, NSCoder.string(for: view.frame), view.isHidden ? "YES" : "NO")
+        
+        // Only go 3 levels deep to avoid spam
+        if indent < 3 {
+            for subview in view.subviews {
+                debugPrintViewHierarchy(subview, indent: indent + 1)
+            }
+        }
+    }
+    
+    /// Clear the response reserve inset (call when streaming is complete or cancelled)
+    func clearResponseReserve(animated: Bool = true) {
+        guard let scrollView = scrollView else { return }
+        guard responseReserveInset > 0 else { return }
+        
+        // Gather metrics for intelligent behavior
+        let contentHeight = scrollView.contentSize.height
+        let viewportHeight = scrollView.bounds.height
+        let currentOffset = scrollView.contentOffset.y
+        let topInset = scrollView.adjustedContentInset.top
+        let currentBottomInset = scrollView.contentInset.bottom
+        let baseInsetWithoutReserve = currentBottomInset - responseReserveInset
+        
+        // Calculate if content exceeds viewport (accounting for insets)
+        let visibleHeight = viewportHeight - topInset - baseInsetWithoutReserve
+        let contentExceedsViewport = contentHeight > visibleHeight
+        
+        // Calculate max scrollable offset (what "bottom" means)
+        let maxOffset = max(-topInset, contentHeight - viewportHeight + baseInsetWithoutReserve)
+        let isNearBottom = currentOffset >= maxOffset - 50
+        
+        NSLog("[clearResponseReserve] === METRICS ===")
+        NSLog("[clearResponseReserve] contentHeight=%.0f viewportHeight=%.0f", contentHeight, viewportHeight)
+        NSLog("[clearResponseReserve] visibleHeight=%.0f (viewport - topInset - baseInset)", visibleHeight)
+        NSLog("[clearResponseReserve] contentExceedsViewport=%@", contentExceedsViewport ? "YES" : "NO")
+        NSLog("[clearResponseReserve] currentOffset=%.0f maxOffset=%.0f isNearBottom=%@", currentOffset, maxOffset, isNearBottom ? "YES" : "NO")
+        NSLog("[clearResponseReserve] reserveBeingRemoved=%.0f baseInsetWithoutReserve=%.0f", responseReserveInset, baseInsetWithoutReserve)
+        
+        // Only clear reserve if content is SHORT (fits in viewport)
+        // For long content, leave the reserve - user is scrolling manually anyway
+        // and the extra bottom space isn't jarring
+        if contentExceedsViewport {
+            NSLog("[clearResponseReserve] Content exceeds viewport - keeping reserve to avoid snap. User can scroll manually.")
+            // Don't clear the reserve - let user scroll naturally
+            // The reserve provides extra bottom padding which is fine for long content
+            return
+        }
+        
+        // Content is short - clear reserve gently
+        NSLog("[clearResponseReserve] Content fits in viewport - clearing reserve")
+        responseReserveInset = 0
+        
+        if animated {
+            UIView.animate(withDuration: 0.25, delay: 0, options: .curveEaseOut) {
+                self.updateContentInset()
+            }
+        } else {
+            updateContentInset()
+        }
+    }
+    
+    /// Get current reserve inset value
+    var currentReserveInset: CGFloat {
+        return responseReserveInset
+    }
+    
+    /// Find the last message view in the content hierarchy.
+    /// This looks for the last view that appears to be a message bubble.
+    private func findLastMessageView(in contentView: UIView) -> UIView? {
+        // React Native Fabric structure:
+        // ScrollView > UIView (content) > RCTViewComponentView (container) > [Message views...]
+        // We need to find the actual message bubbles, not the container
+        
+        let contentWidth = contentView.bounds.width
+        let contentHeight = contentView.bounds.height
+        
+        // Recursively search for message-like views
+        func findMessages(in view: UIView, depth: Int = 0) -> [UIView] {
+            var messages: [UIView] = []
+            
+            for subview in view.subviews {
+                let frame = subview.frame
+                
+                // Skip hidden views
+                guard !subview.isHidden else { continue }
+                
+                // Skip scroll indicators
+                let className = String(describing: type(of: subview))
+                if className.contains("ScrollIndicator") { continue }
+                
+                // Check if this looks like a message bubble:
+                // 1. Not at origin (0, 0) - containers start at origin
+                // 2. Not full width - containers span full width
+                // 3. Not full height - containers span full content height
+                // 4. Reasonable size - height > 20, width > 40
+                let isAtOrigin = frame.origin.x == 0 && frame.origin.y == 0
+                let isFullWidth = abs(frame.width - contentWidth) < 10
+                let isFullHeight = abs(frame.height - contentHeight) < 10
+                let hasReasonableSize = frame.height > 20 && frame.width > 40
+                
+                if !isAtOrigin && !isFullWidth && !isFullHeight && hasReasonableSize {
+                    // This looks like a message bubble
+                    messages.append(subview)
+                } else if depth < 2 {
+                    // This might be a container, search inside (limit depth to avoid going too deep)
+                    messages.append(contentsOf: findMessages(in: subview, depth: depth + 1))
+                }
+            }
+            
+            return messages
+        }
+        
+        let candidateViews = findMessages(in: contentView)
+        
+        NSLog("[KeyboardAwareScrollHandler] findLastMessageView: found %d candidate messages", candidateViews.count)
+        
+        // Sort by Y position (bottom-most = latest)
+        let sorted = candidateViews.sorted { $0.frame.maxY < $1.frame.maxY }
+        
+        if let last = sorted.last {
+            NSLog("[KeyboardAwareScrollHandler] findLastMessageView: selected view at Y=%.0f H=%.0f", last.frame.origin.y, last.frame.height)
+        }
+        
+        return sorted.last
+    }
+    
+    /// Gradually reduce reserve as content fills in (call during streaming)
+    /// - Parameter newContentHeight: Height of new content added since pinning
+    func adjustReserveForNewContent(addedHeight: CGFloat) {
+        guard responseReserveInset > 0 else { return }
+        
+        // Reduce reserve by the amount of new content
+        let newReserve = max(0, responseReserveInset - addedHeight)
+        
+        if newReserve != responseReserveInset {
+            responseReserveInset = newReserve
+            updateContentInset()
+            
+            #if DEBUG
+            NSLog("[KeyboardAwareScrollHandler] adjustReserveForNewContent: added=%.0f newReserve=%.0f", 
+                  addedHeight, newReserve)
+            #endif
         }
     }
 }

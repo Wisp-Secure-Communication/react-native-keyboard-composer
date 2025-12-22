@@ -1,6 +1,11 @@
 import ExpoModulesCore
 import UIKit
 
+extension Notification.Name {
+    static let keyboardComposerDidSend = Notification.Name("keyboardComposerDidSend")
+    static let keyboardComposerStreamingEnded = Notification.Name("keyboardComposerStreamingEnded")
+}
+
 class KeyboardComposerView: ExpoView {
 
   // MARK: - Props (set from JS)
@@ -49,6 +54,11 @@ class KeyboardComposerView: ExpoView {
   var isStreaming: Bool = false {
     didSet {
       updateButtonAppearance()
+      
+      // When streaming ends (true -> false), notify wrapper to clear reserve
+      if oldValue == true && isStreaming == false {
+        NotificationCenter.default.post(name: .keyboardComposerStreamingEnded, object: nil)
+      }
     }
   }
 
@@ -297,12 +307,18 @@ class KeyboardComposerView: ExpoView {
     textView.resignFirstResponder()
     updateHeight()
     updateSendButtonState()
+    
+    // Notify wrapper to request pin-to-top (event-driven, no delays)
+    NotificationCenter.default.post(name: .keyboardComposerDidSend, object: nil)
   }
 
   private func handleStop() {
     let generator = UIImpactFeedbackGenerator(style: .medium)
     generator.impactOccurred()
     onStop([:])
+    
+    // Notify wrapper to clear reserve space
+    NotificationCenter.default.post(name: .keyboardComposerStreamingEnded, object: nil)
   }
 
   private func updateButtonAppearance() {

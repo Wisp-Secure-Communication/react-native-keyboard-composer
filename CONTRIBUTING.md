@@ -70,6 +70,7 @@ react-native-keyboard-composer/
    ```
 
 2. **Make your changes**
+
    - TypeScript changes go in `src/`
    - iOS native changes go in `ios/`
    - Android native changes go in `android/`
@@ -176,6 +177,3 @@ Be respectful and constructive in all interactions. We're all here to build some
 ## Questions?
 
 Open an issue or reach out to the maintainers. We're happy to help!
-
-
-

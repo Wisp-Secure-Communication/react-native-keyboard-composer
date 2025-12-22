@@ -69,6 +69,16 @@ public class KeyboardComposerModule: Module {
       Prop("scrollToTopTrigger") { (view: KeyboardAwareWrapper, value: Double) in
         view.scrollToTopTrigger = value
       }
+      
+      Prop("pinToTopTrigger") { (view: KeyboardAwareWrapper, value: Double) in
+        NSLog("[KeyboardComposerModule] pinToTopTrigger prop received: %.0f", value)
+        view.pinToTopTrigger = value
+      }
+      
+      Prop("clearReserveTrigger") { (view: KeyboardAwareWrapper, value: Double) in
+        NSLog("[KeyboardComposerModule] clearReserveTrigger prop received: %.0f", value)
+        view.clearReserveTrigger = value
+      }
     }
     
   }

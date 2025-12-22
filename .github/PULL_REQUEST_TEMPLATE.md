@@ -64,6 +64,3 @@ Show before and after on affected platforms.
 ## Additional Notes
 
 <!-- Any additional context, implementation notes, or considerations -->
-
-
-

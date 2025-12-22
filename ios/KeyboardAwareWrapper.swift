@@ -28,6 +28,8 @@ class KeyboardAwareWrapper: ExpoView, KeyboardAwareScrollHandlerDelegate {
     // KVO observations
     private var extraBottomInsetObservation: NSKeyValueObservation?
     private var scrollToTopTriggerObservation: NSKeyValueObservation?
+    private var pinToTopTriggerObservation: NSKeyValueObservation?
+    private var clearReserveTriggerObservation: NSKeyValueObservation?
     
     // Base inset: composer height only (from JS)
     // Gap and safe area are handled natively
@@ -36,6 +38,12 @@ class KeyboardAwareWrapper: ExpoView, KeyboardAwareScrollHandlerDelegate {
     
     /// Trigger scroll to top when this value changes (use timestamp/counter from JS)
     @objc dynamic var scrollToTopTrigger: Double = 0
+    
+    /// Trigger pin-to-top behavior (ChatGPT style) when this value changes
+    @objc dynamic var pinToTopTrigger: Double = 0
+    
+    /// Trigger clearing of response reserve when this value changes
+    @objc dynamic var clearReserveTrigger: Double = 0
     
     required init(appContext: AppContext? = nil) {
         super.init(appContext: appContext)
@@ -53,6 +61,8 @@ class KeyboardAwareWrapper: ExpoView, KeyboardAwareScrollHandlerDelegate {
         NotificationCenter.default.removeObserver(self)
         extraBottomInsetObservation?.invalidate()
         scrollToTopTriggerObservation?.invalidate()
+        pinToTopTriggerObservation?.invalidate()
+        clearReserveTriggerObservation?.invalidate()
     }
     
     // MARK: - Property Observers (KVO)
@@ -87,6 +97,29 @@ class KeyboardAwareWrapper: ExpoView, KeyboardAwareScrollHandlerDelegate {
             
             self.keyboardHandler.scrollNewContentToTop(estimatedHeight: 100)
         }
+        
+        pinToTopTriggerObservation = observe(\.pinToTopTrigger, options: [.new]) { [weak self] _, change in
+            NSLog("[KeyboardWrapper] pinToTopTrigger KVO callback, newValue=%@", String(describing: change.newValue))
+            guard let self = self,
+                  let newValue = change.newValue,
+                  newValue > 0 else {
+                NSLog("[KeyboardWrapper] pinToTopTrigger skipped (guard failed)")
+                return
+            }
+            
+            NSLog("[KeyboardWrapper] pinToTopTrigger fired with value=%.0f", newValue)
+            self.keyboardHandler.pinLatestMessageToTop()
+        }
+        
+        clearReserveTriggerObservation = observe(\.clearReserveTrigger, options: [.new]) { [weak self] _, change in
+            NSLog("[KeyboardWrapper] clearReserveTrigger KVO callback, newValue=%@", String(describing: change.newValue))
+            guard let self = self,
+                  let newValue = change.newValue,
+                  newValue > 0 else { return }
+            
+            NSLog("[KeyboardWrapper] clearReserveTrigger fired")
+            self.keyboardHandler.clearResponseReserve(animated: true)
+        }
     }
     
     // MARK: - Keyboard Observers
@@ -110,6 +143,32 @@ class KeyboardAwareWrapper: ExpoView, KeyboardAwareScrollHandlerDelegate {
             name: UIResponder.keyboardWillChangeFrameNotification,
             object: nil
         )
+        
+        // Listen for composer send to trigger pin-to-top
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleComposerDidSend),
+            name: .keyboardComposerDidSend,
+            object: nil
+        )
+        
+        // Listen for streaming ended to clear reserve
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleStreamingEnded),
+            name: .keyboardComposerStreamingEnded,
+            object: nil
+        )
+    }
+    
+    @objc private func handleComposerDidSend() {
+        NSLog("[KeyboardWrapper] Received composerDidSend notification - triggering pin-to-top")
+        keyboardHandler.pinLatestMessageToTop()
+    }
+    
+    @objc private func handleStreamingEnded() {
+        NSLog("[KeyboardWrapper] Received streamingEnded notification - clearing reserve")
+        keyboardHandler.clearResponseReserve(animated: true)
     }
     
     @objc private func keyboardWillShow(_ notification: Notification) {

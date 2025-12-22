@@ -135,11 +135,14 @@ function ChatScreen() {
   const [composerHeight, setComposerHeight] = useState(
     constants.defaultMinHeight
   );
+  const [isStreaming, setIsStreaming] = useState(false);
 
   const handleHeightChange = useCallback((height: number) => {
     setComposerHeight(height);
   }, []);
   const [scrollTrigger, setScrollTrigger] = useState(0);
+  const [pinTrigger, setPinTrigger] = useState(0);
+  const [clearReserveTrigger, setClearReserveTrigger] = useState(0);
 
   // Responsive layout
   const isLargeScreen = isTablet || isDesktop;
@@ -165,25 +168,70 @@ function ChatScreen() {
     };
 
     setMessages((prev) => [...prev, userMessage]);
-    setTimeout(() => setScrollTrigger(Date.now()), 100);
 
-    // Simulate assistant response
-    setTimeout(() => {
-      const responses = [
-        "That's interesting! Tell me more.",
-        "I see what you mean. Good keyboard handling really does make a difference in chat UX.",
-        "Great observation! Notice how the content adjusts as you type.",
-        "Thanks for trying out the keyboard composer! 🚀",
-      ];
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: responses[Math.floor(Math.random() * responses.length)],
-        role: "assistant",
-        timestamp: Date.now(),
-      };
-      setMessages((prev) => [...prev, assistantMessage]);
-      setTimeout(() => setScrollTrigger(Date.now()), 100);
-    }, 1000);
+    // Trigger pin-to-top (ChatGPT style) - pins user message at top with runway below
+    const triggerValue = Date.now();
+    console.log("[App] Setting pinTrigger to:", triggerValue);
+    setPinTrigger(triggerValue);
+    setIsStreaming(true);
+
+    // Simulate streaming assistant response
+    const responses = [
+      "That's interesting! Tell me more about what you're building.",
+      "I see what you mean. Good keyboard handling really does make a difference in chat UX. The pin-to-top feature creates that familiar ChatGPT experience where your message stays visible at the top while the response streams in below.",
+      "Great observation! Notice how the content adjusts as you type. This library handles all the edge cases - keyboard opening, input growing, scroll position management.",
+      "Thanks for trying out the keyboard composer! The pin-to-top with runway feature is perfect for AI chat apps where you want the user's message to stay visible while streaming the response.",
+    ];
+    const responseText =
+      responses[Math.floor(Math.random() * responses.length)];
+
+    // Simulate streaming with words appearing one by one
+    let currentText = "";
+    const words = responseText.split(" ");
+    let wordIndex = 0;
+
+    const streamInterval = setInterval(() => {
+      if (wordIndex < words.length) {
+        currentText += (wordIndex > 0 ? " " : "") + words[wordIndex];
+        wordIndex++;
+
+        // Update or add the assistant message
+        setMessages((prev) => {
+          const existingAssistantIndex = prev.findIndex(
+            (m) => m.id === "streaming"
+          );
+          const streamingMessage: Message = {
+            id: "streaming",
+            text: currentText,
+            role: "assistant",
+            timestamp: Date.now(),
+          };
+
+          if (existingAssistantIndex >= 0) {
+            const updated = [...prev];
+            updated[existingAssistantIndex] = streamingMessage;
+            return updated;
+          } else {
+            return [...prev, streamingMessage];
+          }
+        });
+      } else {
+        // Streaming complete
+        clearInterval(streamInterval);
+        setIsStreaming(false);
+
+        // Finalize the message with a real ID
+        setMessages((prev) => {
+          const updated = prev.map((m) =>
+            m.id === "streaming" ? { ...m, id: Date.now().toString() } : m
+          );
+          return updated;
+        });
+
+        // Clear the reserve space
+        setClearReserveTrigger(Date.now());
+      }
+    }, 80); // 80ms per word for realistic streaming
   }, []);
 
   const renderMessage = (item: Message) => {
@@ -267,6 +315,8 @@ function ChatScreen() {
         style={styles.chatArea}
         extraBottomInset={baseBottomInset}
         scrollToTopTrigger={scrollTrigger}
+        pinToTopTrigger={pinTrigger}
+        clearReserveTrigger={clearReserveTrigger}
       >
         {/* ScrollView with messages */}
         <ScrollView
@@ -304,6 +354,11 @@ function ChatScreen() {
                 minHeight={constants.defaultMinHeight}
                 maxHeight={constants.defaultMaxHeight}
                 sendButtonEnabled={true}
+                isStreaming={isStreaming}
+                onStop={() => {
+                  setIsStreaming(false);
+                  setClearReserveTrigger(Date.now());
+                }}
                 style={{ flex: 1 }}
               />
             </View>
