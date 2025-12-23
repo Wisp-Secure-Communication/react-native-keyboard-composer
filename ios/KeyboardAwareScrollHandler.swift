@@ -204,7 +204,8 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
         
         let contentHeight = scrollView.contentSize.height
         let scrollViewHeight = scrollView.bounds.height
-        let bottomInset = scrollView.contentInset.bottom
+        // Use inset without runway so we scroll to actual content bottom, not blank space
+        let bottomInset = bottomInsetWithoutReserve(scrollView)
         let maxOffset = max(0, contentHeight - scrollViewHeight + bottomInset)
         
         scrollView.setContentOffset(CGPoint(x: 0, y: maxOffset), animated: animated)
@@ -267,8 +268,13 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
     private func checkAndUpdateScrollPosition() {
         guard let scrollView = scrollView else { return }
         
-        // Only show button if content exceeds viewport
-        let contentExceedsViewport = scrollView.contentSize.height > scrollView.bounds.height
+        // Calculate visible height for messages (excluding runway reserve)
+        let topInset = scrollView.adjustedContentInset.top
+        let baseInset = bottomInsetWithoutReserve(scrollView)
+        let visibleHeightForMessages = scrollView.bounds.height - topInset - baseInset
+        
+        // Only show button when actual message content exceeds viewport (not runway)
+        let contentExceedsViewport = scrollView.contentSize.height > visibleHeightForMessages + 1
         
         if !contentExceedsViewport {
             if !isAtBottom {
