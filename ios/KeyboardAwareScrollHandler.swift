@@ -154,10 +154,15 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
         )
     }
     
+    /// Bottom inset excluding the runway reserve (for accurate "at bottom" calculations)
+    private func bottomInsetWithoutReserve(_ scrollView: UIScrollView) -> CGFloat {
+        max(0, scrollView.contentInset.bottom - responseReserveInset)
+    }
+    
     private func isNearBottom(_ scrollView: UIScrollView) -> Bool {
         let contentHeight = scrollView.contentSize.height
         let scrollViewHeight = scrollView.bounds.height
-        let bottomInset = scrollView.contentInset.bottom
+        let bottomInset = bottomInsetWithoutReserve(scrollView)
         let currentOffset = scrollView.contentOffset.y
         let maxOffset = max(0, contentHeight - scrollViewHeight + bottomInset)
         
@@ -248,6 +253,14 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
     
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         checkAndUpdateScrollPosition()
+    }
+    
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        // If user starts scrolling while runway exists, clear it so they can't get stranded in blank space
+        if responseReserveInset > 0 {
+            NSLog("[ScrollHandler] User started dragging - clearing runway to prevent blank screen")
+            clearResponseReserve(animated: true, force: true)
+        }
     }
     
     /// Check scroll position and notify delegate if changed
@@ -498,10 +511,11 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
         }
         
         let contentH = scrollView.contentSize.height
-        let maxOffset = max(0, contentH - viewportH + scrollView.contentInset.bottom)
-        let clampedY = max(0, min(targetY, maxOffset))
+        let minOffset = -topInset
+        let maxOffset = max(minOffset, contentH - viewportH + scrollView.contentInset.bottom)
+        let clampedY = max(minOffset, min(targetY, maxOffset))
         
-        NSLog("[Pin] targetY=%.0f maxOffset=%.0f clampedY=%.0f", targetY, maxOffset, clampedY)
+        NSLog("[Pin] targetY=%.0f minOffset=%.0f maxOffset=%.0f clampedY=%.0f", targetY, minOffset, maxOffset, clampedY)
         
         UIView.animate(
             withDuration: 0.4,
@@ -564,14 +578,16 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
     }
     
     /// Clear the response reserve inset (call when streaming is complete or cancelled)
-    func clearResponseReserve(animated: Bool = true) {
+    /// - Parameters:
+    ///   - animated: Whether to animate the inset change
+    ///   - force: If true, clears reserve regardless of content size (used when user starts scrolling)
+    func clearResponseReserve(animated: Bool = true, force: Bool = false) {
         guard let scrollView = scrollView else { return }
         guard responseReserveInset > 0 else { return }
         
         // Gather metrics for intelligent behavior
         let contentHeight = scrollView.contentSize.height
         let viewportHeight = scrollView.bounds.height
-        let currentOffset = scrollView.contentOffset.y
         let topInset = scrollView.adjustedContentInset.top
         let currentBottomInset = scrollView.contentInset.bottom
         let baseInsetWithoutReserve = currentBottomInset - responseReserveInset
@@ -580,29 +596,15 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
         let visibleHeight = viewportHeight - topInset - baseInsetWithoutReserve
         let contentExceedsViewport = contentHeight > visibleHeight
         
-        // Calculate max scrollable offset (what "bottom" means)
-        let maxOffset = max(-topInset, contentHeight - viewportHeight + baseInsetWithoutReserve)
-        let isNearBottom = currentOffset >= maxOffset - 50
+        NSLog("[clearResponseReserve] force=%@ contentExceedsViewport=%@", force ? "YES" : "NO", contentExceedsViewport ? "YES" : "NO")
         
-        NSLog("[clearResponseReserve] === METRICS ===")
-        NSLog("[clearResponseReserve] contentHeight=%.0f viewportHeight=%.0f", contentHeight, viewportHeight)
-        NSLog("[clearResponseReserve] visibleHeight=%.0f (viewport - topInset - baseInset)", visibleHeight)
-        NSLog("[clearResponseReserve] contentExceedsViewport=%@", contentExceedsViewport ? "YES" : "NO")
-        NSLog("[clearResponseReserve] currentOffset=%.0f maxOffset=%.0f isNearBottom=%@", currentOffset, maxOffset, isNearBottom ? "YES" : "NO")
-        NSLog("[clearResponseReserve] reserveBeingRemoved=%.0f baseInsetWithoutReserve=%.0f", responseReserveInset, baseInsetWithoutReserve)
-        
-        // Only clear reserve if content is SHORT (fits in viewport)
-        // For long content, leave the reserve - user is scrolling manually anyway
-        // and the extra bottom space isn't jarring
-        if contentExceedsViewport {
-            NSLog("[clearResponseReserve] Content exceeds viewport - keeping reserve to avoid snap. User can scroll manually.")
-            // Don't clear the reserve - let user scroll naturally
-            // The reserve provides extra bottom padding which is fine for long content
+        // Unless forced, only clear reserve if content is SHORT (fits in viewport)
+        if !force && contentExceedsViewport {
+            NSLog("[clearResponseReserve] Content exceeds viewport - keeping reserve (not forced)")
             return
         }
         
-        // Content is short - clear reserve gently
-        NSLog("[clearResponseReserve] Content fits in viewport - clearing reserve")
+        NSLog("[clearResponseReserve] Clearing reserve (%.0f)", responseReserveInset)
         responseReserveInset = 0
         
         if animated {
