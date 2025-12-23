@@ -24,8 +24,8 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
     /// Maximum reserve space (prevents excessive empty space)
     private let maxReserveInset: CGFloat = 520
     
-    /// Top padding when pinning message (small value to hide previous messages)
-    private let pinTopPadding: CGFloat = 8
+    /// Top padding when pinning message (0 = message at very top, hiding all previous)
+    private let pinTopPadding: CGFloat = 0
     
     /// Flag: pin-to-top is pending, waiting for content to be added
     private var pendingPinToTop = false
@@ -422,7 +422,7 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
     }
     
     /// Perform the actual pin-to-top animation (no delays, called when ready)
-    /// Uses VIEW-ANCHORED approach: pins to actual user bubble position, not contentSize
+    /// Shows exactly 2 things: user's new message + runway for AI response
     private func performPinAnimation() {
         guard let scrollView = scrollView else { return }
         
@@ -432,41 +432,76 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
         let viewportH = scrollView.bounds.height
         let topInset = scrollView.adjustedContentInset.top
         
-        // Find RN content view more reliably than subviews.first
+        // Find RN content view reliably
         let contentView = scrollView.subviews.max(by: { $0.bounds.height < $1.bounds.height }) ?? scrollView
         
-        // Find the latest USER bubble to pin (right aligned)
-        guard let userBubble = findLatestUserBubble(in: contentView) else {
-            NSLog("[Pin] Could not find user bubble")
+        // Find all message containers
+        let messages = findMessageContainers(in: contentView)
+            .sorted { $0.frame.maxY < $1.frame.maxY }
+        
+        NSLog("[Pin] Found %d message containers. Last 5:", messages.count)
+        for (idx, msg) in messages.suffix(5).enumerated() {
+            NSLog("[Pin]   [%d] Y=%.0f H=%.0f maxY=%.0f", idx, msg.frame.minY, msg.frame.height, msg.frame.maxY)
+        }
+        NSLog("[Pin] Old contentSize was: %.0f (new message should be near this Y)", contentSizeAtPinRequest.height)
+        
+        guard let lastMessage = messages.last else {
+            NSLog("[Pin] No messages found")
             return
         }
         
-        let messageH = userBubble.bounds.height
+        // Check if we found the RIGHT message (should be near old content size)
+        let foundCorrectMessage = lastMessage.frame.minY >= contentSizeAtPinRequest.height - 50
         
-        // Compute runway dynamically (viewport-based, not fixed cap)
+        if !foundCorrectMessage {
+            NSLog("[Pin] New message not found in view tree yet. Using contentSize-based scroll.")
+        }
+        
+        let messageH = foundCorrectMessage ? lastMessage.bounds.height : CGFloat(60)
+        
+        // Compute runway: viewport minus (padding + message + typing indicator + buffer)
         let typingIndicatorH: CGFloat = 32
         let bottomBuffer: CGFloat = 16
         
-        // Visible area below the pinned message
         var reserve = (viewportH - topInset) - (pinTopPadding + messageH + typingIndicatorH + bottomBuffer)
         reserve = max(0, reserve)
-        
-        // Cap to viewport height instead of fixed 520
         reserve = min(reserve, viewportH)
         
         responseReserveInset = reserve
         updateContentInset()
         
-        // Pin the bubble to the top (view-anchored, not contentSize-anchored)
-        let targetY = userBubble.frame.minY - topInset - pinTopPadding
+        // Pin the LAST message (user's new message) to the top
+        // This hides ALL previous messages
+        let messageY = lastMessage.frame.minY
         
-        // Clamp using the NEW bottom inset (includes reserve)
+        // Log all the values to understand what's happening
+        NSLog("[Pin] === DEBUG VALUES ===")
+        NSLog("[Pin] scrollView.frame=%@", NSCoder.string(for: scrollView.frame))
+        NSLog("[Pin] scrollView.bounds=%@", NSCoder.string(for: scrollView.bounds))
+        NSLog("[Pin] adjustedContentInset.top=%.0f bottom=%.0f", scrollView.adjustedContentInset.top, scrollView.adjustedContentInset.bottom)
+        NSLog("[Pin] contentInset.top=%.0f bottom=%.0f", scrollView.contentInset.top, scrollView.contentInset.bottom)
+        NSLog("[Pin] contentSize=%.0f x %.0f", scrollView.contentSize.width, scrollView.contentSize.height)
+        NSLog("[Pin] current contentOffset.y=%.0f", scrollView.contentOffset.y)
+        NSLog("[Pin] lastMessage.frame=%@", NSCoder.string(for: lastMessage.frame))
+        
+        // Scroll to pin the new message at the top
+        // If we found the actual message, use its position
+        // Otherwise, use the old content size (where new content starts)
+        let targetY: CGFloat
+        if foundCorrectMessage {
+            targetY = messageY - pinTopPadding
+        } else {
+            // New message starts at approximately old content size minus margin
+            let messageMargin: CGFloat = 16
+            targetY = contentSizeAtPinRequest.height - messageMargin
+            NSLog("[Pin] Using contentSize-based offset: %.0f", targetY)
+        }
+        
         let contentH = scrollView.contentSize.height
-        let maxOffset = max(-topInset, contentH - viewportH + scrollView.contentInset.bottom)
-        let clampedY = max(-topInset, min(targetY, maxOffset))
+        let maxOffset = max(0, contentH - viewportH + scrollView.contentInset.bottom)
+        let clampedY = max(0, min(targetY, maxOffset))
         
-        NSLog("[Pin] viewport=%.0f msgH=%.0f msgY=%.0f reserve=%.0f targetY=%.0f", 
-              viewportH, messageH, userBubble.frame.minY, reserve, clampedY)
+        NSLog("[Pin] targetY=%.0f maxOffset=%.0f clampedY=%.0f", targetY, maxOffset, clampedY)
         
         UIView.animate(
             withDuration: 0.4,
@@ -480,14 +515,14 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
         }
     }
     
-    /// Picks the newest right-aligned "user bubble" view.
-    /// User messages are right-aligned, assistant messages are left-aligned.
-    /// This avoids brittle "second to last" assumptions and works across screen sizes.
-    private func findLatestUserBubble(in contentView: UIView) -> UIView? {
+    /// Find all message container views (not text/paragraph views)
+    private func findMessageContainers(in contentView: UIView) -> [UIView] {
         let contentWidth = contentView.bounds.width
+        let contentHeight = contentView.bounds.height
         
-        func collectCandidates(in view: UIView, depth: Int = 0) -> [UIView] {
+        func walk(_ view: UIView, depth: Int = 0) -> [UIView] {
             var out: [UIView] = []
+            
             for sub in view.subviews {
                 guard !sub.isHidden, sub.alpha > 0.01 else { continue }
                 
@@ -498,24 +533,20 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
                 let f = sub.frame
                 let reasonable = f.height > 20 && f.width > 40
                 let fullWidth = abs(f.width - contentWidth) < 10
-                if reasonable && !fullWidth {
+                let fullHeight = abs(f.height - contentHeight) < 10
+                let atOrigin = f.origin.x == 0 && f.origin.y == 0
+                
+                if reasonable && !fullWidth && !fullHeight && !atOrigin {
                     out.append(sub)
                 } else if depth < 2 {
-                    out.append(contentsOf: collectCandidates(in: sub, depth: depth + 1))
+                    out.append(contentsOf: walk(sub, depth: depth + 1))
                 }
             }
+            
             return out
         }
         
-        let candidates = collectCandidates(in: contentView)
-            .sorted { $0.frame.maxY < $1.frame.maxY }
-        
-        // Heuristic: user bubbles are right aligned (maxX close to content width)
-        let rightAligned = candidates.filter { ($0.frame.maxX / max(contentWidth, 1)) > 0.80 }
-        
-        NSLog("[Pin] Found %d candidates, %d right-aligned", candidates.count, rightAligned.count)
-        
-        return rightAligned.last ?? candidates.last
+        return walk(contentView)
     }
     
     /// Debug helper to print view hierarchy
@@ -586,121 +617,6 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
     /// Get current reserve inset value
     var currentReserveInset: CGFloat {
         return responseReserveInset
-    }
-    
-    /// Find the last message view in the content hierarchy.
-    /// This looks for the last view that appears to be a message bubble.
-    private func findLastMessageView(in contentView: UIView) -> UIView? {
-        // React Native Fabric structure:
-        // ScrollView > UIView (content) > RCTViewComponentView (container) > [Message views...]
-        // We need to find the actual message bubbles, not the container
-        
-        let contentWidth = contentView.bounds.width
-        let contentHeight = contentView.bounds.height
-        
-        // Recursively search for message-like views
-        func findMessages(in view: UIView, depth: Int = 0) -> [UIView] {
-            var messages: [UIView] = []
-            
-            for subview in view.subviews {
-                let frame = subview.frame
-                
-                // Skip hidden views
-                guard !subview.isHidden else { continue }
-                
-                // Skip scroll indicators
-                let className = String(describing: type(of: subview))
-                if className.contains("ScrollIndicator") { continue }
-                
-                // Check if this looks like a message bubble:
-                // 1. Not at origin (0, 0) - containers start at origin
-                // 2. Not full width - containers span full width
-                // 3. Not full height - containers span full content height
-                // 4. Reasonable size - height > 20, width > 40
-                let isAtOrigin = frame.origin.x == 0 && frame.origin.y == 0
-                let isFullWidth = abs(frame.width - contentWidth) < 10
-                let isFullHeight = abs(frame.height - contentHeight) < 10
-                let hasReasonableSize = frame.height > 20 && frame.width > 40
-                
-                if !isAtOrigin && !isFullWidth && !isFullHeight && hasReasonableSize {
-                    // This looks like a message bubble
-                    messages.append(subview)
-                } else if depth < 2 {
-                    // This might be a container, search inside (limit depth to avoid going too deep)
-                    messages.append(contentsOf: findMessages(in: subview, depth: depth + 1))
-                }
-            }
-            
-            return messages
-        }
-        
-        let candidateViews = findMessages(in: contentView)
-        
-        NSLog("[KeyboardAwareScrollHandler] findLastMessageView: found %d candidate messages", candidateViews.count)
-        
-        // Sort by Y position (bottom-most = latest)
-        let sorted = candidateViews.sorted { $0.frame.maxY < $1.frame.maxY }
-        
-        if let last = sorted.last {
-            NSLog("[KeyboardAwareScrollHandler] findLastMessageView: selected view at Y=%.0f H=%.0f", last.frame.origin.y, last.frame.height)
-        }
-        
-        return sorted.last
-    }
-    
-    /// Find the user's message to pin (second-to-last message CONTAINER).
-    /// When streaming starts, the AI response becomes the "last" message,
-    /// but we want to pin the user's message (second-to-last).
-    /// Only counts container views, not paragraph/text views inside them.
-    private func findUserMessageToPin(in contentView: UIView) -> UIView? {
-        let contentWidth = contentView.bounds.width
-        let contentHeight = contentView.bounds.height
-        
-        func findMessageContainers(in view: UIView, depth: Int = 0) -> [UIView] {
-            var messages: [UIView] = []
-            
-            for subview in view.subviews {
-                let frame = subview.frame
-                guard !subview.isHidden else { continue }
-                
-                let className = String(describing: type(of: subview))
-                
-                // Skip scroll indicators
-                if className.contains("ScrollIndicator") { continue }
-                
-                // Skip paragraph/text views - we only want container views
-                if className.contains("Paragraph") || className.contains("Text") { continue }
-                
-                let isAtOrigin = frame.origin.x == 0 && frame.origin.y == 0
-                let isFullWidth = abs(frame.width - contentWidth) < 10
-                let isFullHeight = abs(frame.height - contentHeight) < 10
-                let hasReasonableSize = frame.height > 20 && frame.width > 40
-                
-                if !isAtOrigin && !isFullWidth && !isFullHeight && hasReasonableSize {
-                    // This is a message container
-                    messages.append(subview)
-                } else if depth < 2 {
-                    messages.append(contentsOf: findMessageContainers(in: subview, depth: depth + 1))
-                }
-            }
-            
-            return messages
-        }
-        
-        let candidateViews = findMessageContainers(in: contentView)
-        let sorted = candidateViews.sorted { $0.frame.maxY < $1.frame.maxY }
-        
-        NSLog("[KeyboardAwareScrollHandler] findUserMessageToPin: found %d message CONTAINERS", sorted.count)
-        
-        // Select the LAST message (user's message)
-        // The AI response hasn't been added yet when this runs
-        if let last = sorted.last {
-            NSLog("[KeyboardAwareScrollHandler] findUserMessageToPin: selected LAST container at Y=%.0f H=%.0f", 
-                  last.frame.origin.y, last.frame.height)
-            return last
-        }
-        
-        return nil
     }
     
     /// Gradually reduce reserve as content fills in (call during streaming)
