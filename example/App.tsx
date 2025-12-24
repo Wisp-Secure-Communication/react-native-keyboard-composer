@@ -167,27 +167,69 @@ function ChatScreen() {
     setMessages((prev) => [...prev, userMessage]);
     setTimeout(() => setScrollTrigger(Date.now()), 100);
 
-    // Simulate assistant response
+    // Simulate streaming assistant response
+    const responses = [
+      "That's interesting! Tell me more about what you're building. I'd love to hear more details about your project and how the keyboard handling fits into your app's UX.",
+      "I see what you mean. Good keyboard handling really does make a difference in chat UX. The native feel of smooth animations and proper content insets creates a much more polished experience.",
+      "Great observation! Notice how the content adjusts as you type. This library handles all the edge cases: keyboard show/hide, input growing, maintaining scroll position, and more.",
+      "Thanks for trying out the keyboard composer! This demonstrates ChatGPT-style pin-to-top behavior where new messages appear at the top with room for the response to stream in below.",
+      // "This is a really long response to test how the pin-to-top feature handles content that exceeds the viewport height. When you send a message, it gets pinned at the top of the screen with empty space (the runway) below it for the AI response to stream into. As this text continues to grow word by word, you should see the runway gradually filling up with content. The scroll indicator should move accordingly, and the overall experience should feel smooth and natural, just like ChatGPT. Once the response is complete, you should be able to scroll up to see your message history, and when you scroll back down, you should return to this pinned view showing both your message and this response. If the response is longer than the available runway space, the system should handle that gracefully by allowing you to scroll down to see more of the response. This paragraph is intentionally verbose to create enough content to thoroughly test the scrolling behavior, runway management, and overall user experience of the pin-to-top feature. Let's add even more text to make absolutely sure we exceed the viewport height. The keyboard composer library is designed to handle all these edge cases seamlessly, providing a native feel that matches what users expect from apps like ChatGPT, Claude, and other AI chat interfaces. Thank you for testing this feature!",
+    ];
+    // Use the last (long) response for testing, or random for variety
+    const fullResponse = responses[responses.length - 1]; // Always use long response for testing
+    // const fullResponse = responses[Math.floor(Math.random() * responses.length)];
+    const assistantId = (Date.now() + 1).toString();
+
+    // Add empty assistant message first (like typing indicator)
     setTimeout(() => {
-      const responses = [
-        "That's interesting! Tell me more.",
-        "I see what you mean. Good keyboard handling really does make a difference in chat UX.",
-        "Great observation! Notice how the content adjusts as you type.",
-        "Thanks for trying out the keyboard composer! 🚀",
-      ];
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: responses[Math.floor(Math.random() * responses.length)],
-        role: "assistant",
-        timestamp: Date.now(),
-      };
-      setMessages((prev) => [...prev, assistantMessage]);
-      setTimeout(() => setScrollTrigger(Date.now()), 100);
-    }, 1000);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: assistantId,
+          text: "",
+          role: "assistant",
+          timestamp: Date.now(),
+        },
+      ]);
+    }, 500);
+
+    // Stream the response word by word
+    const words = fullResponse.split(" ");
+    let currentText = "";
+
+    words.forEach((word, index) => {
+      setTimeout(() => {
+        currentText += (index === 0 ? "" : " ") + word;
+        const streamedText = currentText;
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === assistantId ? { ...msg, text: streamedText } : msg
+          )
+        );
+      }, 600 + index * 50); // 50ms per word
+    });
   }, []);
 
   const renderMessage = (item: Message) => {
     const isUser = item.role === "user";
+
+    // Show typing indicator for empty assistant messages (streaming)
+    if (!isUser && !item.text) {
+      return (
+        <View key={item.id} style={styles.typingIndicator}>
+          <View
+            style={[styles.bubble, { backgroundColor: colors.assistantBubble }]}
+          >
+            <Text
+              style={{ color: colors.assistantText, fontSize: scaleFont(16) }}
+            >
+              ...
+            </Text>
+          </View>
+        </View>
+      );
+    }
+
     const messageContent = (
       <View
         style={[
@@ -367,6 +409,11 @@ const styles = StyleSheet.create({
   },
   assistantMessage: {
     alignSelf: "flex-start",
+  },
+  typingIndicator: {
+    marginBottom: 16,
+    alignSelf: "flex-start",
+    maxWidth: "80%",
   },
   bubble: {
     paddingHorizontal: 14,

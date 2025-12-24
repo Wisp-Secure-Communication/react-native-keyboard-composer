@@ -278,6 +278,14 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
                               self.runwayInset, newRunway, contentGrowth)
                         self.runwayInset = newRunway
                         self.updateContentInset(preserveScrollPosition: true)
+                        
+                        // When runway is fully consumed, clear pinned state
+                        // This returns scroll-to-bottom and isNearBottom to normal behavior
+                        if newRunway == 0 {
+                            NSLog("[ScrollHandler] Runway exhausted - clearing pinned state")
+                            self.isPinned = false
+                            self.pinnedOffset = 0
+                        }
                     }
                 }
             }
