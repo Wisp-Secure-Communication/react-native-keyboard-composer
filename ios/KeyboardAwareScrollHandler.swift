@@ -36,6 +36,10 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
     /// Flag: waiting for keyboard to hide before pinning
     private var waitingForKeyboardHide = false
     
+    /// Maximum scroll offset when in pinned state (prevents scrolling too far into runway)
+    /// This keeps the pinned message visible on screen
+    private var pinnedMaxOffset: CGFloat? = nil
+    
     /// Get safe area bottom from window
     private var safeAreaBottom: CGFloat {
         scrollView?.window?.safeAreaInsets.bottom ?? 34
@@ -253,15 +257,21 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
     // MARK: - UIScrollViewDelegate
     
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        // Clamp scroll to prevent scrolling too far into runway (keep pinned message visible)
+        if let maxOffset = pinnedMaxOffset {
+            let currentY = scrollView.contentOffset.y
+            if currentY > maxOffset {
+                NSLog("[ScrollHandler] Clamping scroll: %.0f -> %.0f (max)", currentY, maxOffset)
+                scrollView.contentOffset = CGPoint(x: 0, y: maxOffset)
+                return  // Don't run other logic after clamping
+            }
+        }
         checkAndUpdateScrollPosition()
     }
     
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
-        // If user starts scrolling while runway exists, clear it so they can't get stranded in blank space
-        if responseReserveInset > 0 {
-            NSLog("[ScrollHandler] User started dragging - clearing runway to prevent blank screen")
-            clearResponseReserve(animated: true, force: true)
-        }
+        // Intentionally do nothing.
+        // Runway is meant to remain scrollable for short responses.
     }
     
     /// Check scroll position and notify delegate if changed
@@ -523,16 +533,35 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
         
         NSLog("[Pin] targetY=%.0f minOffset=%.0f maxOffset=%.0f clampedY=%.0f", targetY, minOffset, maxOffset, clampedY)
         
+        // Calculate runway max offset: allow scrolling into runway but keep pinned message on screen
+        // Cap at actual content maxOffset so we can't scroll into pure empty space
+        let visibleArea = viewportH - topInset
+        let maxScrollIntoRunway = visibleArea - messageH - 50  // Keep message + 50pt buffer visible
+        let uncappedRunwayMax = clampedY + max(0, maxScrollIntoRunway)
+        let runwayMaxOffset = min(uncappedRunwayMax, maxOffset)  // Don't exceed actual content bounds
+        
+        NSLog("[Pin] Will animate to clampedY=%.0f, runwayMaxOffset=%.0f (runway limit)", clampedY, runwayMaxOffset)
+        
+        // Capture for closure
+        let targetOffset = clampedY
+        let capturedMaxOffset = runwayMaxOffset
+        
         UIView.animate(
             withDuration: 0.4,
             delay: 0,
             usingSpringWithDamping: 1.0,
             initialSpringVelocity: 0,
-            options: [.curveEaseOut, .allowUserInteraction]
-        ) {
-            self.updateContentInset()
-            scrollView.contentOffset = CGPoint(x: 0, y: clampedY)
-        }
+            options: [.curveEaseOut, .allowUserInteraction],
+            animations: {
+                self.updateContentInset()
+                scrollView.contentOffset = CGPoint(x: 0, y: targetOffset)
+            },
+            completion: { _ in
+                // Set max offset AFTER animation completes to limit runway scrolling
+                self.pinnedMaxOffset = capturedMaxOffset
+                NSLog("[Pin] Animation complete, pinnedMaxOffset=%.0f", capturedMaxOffset)
+            }
+        )
     }
     
     /// Find all message container views (not text/paragraph views)
@@ -610,8 +639,9 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
             return
         }
         
-        NSLog("[clearResponseReserve] Clearing reserve (%.0f)", responseReserveInset)
+        NSLog("[clearResponseReserve] Clearing reserve (%.0f) and pinnedMaxOffset", responseReserveInset)
         responseReserveInset = 0
+        pinnedMaxOffset = nil  // Allow free scrolling again
         
         if animated {
             UIView.animate(withDuration: 0.25, delay: 0, options: .curveEaseOut) {

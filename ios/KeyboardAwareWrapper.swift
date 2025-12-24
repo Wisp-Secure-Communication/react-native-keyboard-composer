@@ -167,8 +167,10 @@ class KeyboardAwareWrapper: ExpoView, KeyboardAwareScrollHandlerDelegate {
     }
     
     @objc private func handleStreamingEnded() {
-        NSLog("[KeyboardWrapper] Received streamingEnded notification - clearing reserve")
-        keyboardHandler.clearResponseReserve(animated: true)
+        // Don't clear runway automatically for now.
+        // We want the runway to persist so users can scroll through short responses.
+        // TODO: Reintroduce "clear runway only when content exceeds viewport" later.
+        NSLog("[KeyboardWrapper] Received streamingEnded notification - keeping runway")
     }
     
     @objc private func keyboardWillShow(_ notification: Notification) {
