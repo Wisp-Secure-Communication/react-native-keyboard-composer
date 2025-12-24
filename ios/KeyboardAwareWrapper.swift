@@ -85,7 +85,11 @@ class KeyboardAwareWrapper: ExpoView, KeyboardAwareScrollHandlerDelegate {
                   let newValue = change.newValue,
                   newValue > 0 else { return }
             
-            self.keyboardHandler.scrollNewContentToTop(estimatedHeight: 100)
+            // Log state BEFORE any action
+            self.keyboardHandler.logScrollViewState(context: "scrollToTopTrigger fired")
+            
+            // For now, just log - we'll add behavior incrementally
+            // self.keyboardHandler.scrollNewContentToTop(estimatedHeight: 100)
         }
     }
     
@@ -374,11 +378,28 @@ class KeyboardAwareWrapper: ExpoView, KeyboardAwareScrollHandlerDelegate {
         }
     }
     
+    private var hasLoggedFrames = false
+    
     override func layoutSubviews() {
         super.layoutSubviews()
         
         // Update safe area
         safeAreaBottom = window?.safeAreaInsets.bottom ?? 34
+        
+        // Log frames once after layout is stable
+        if !hasLoggedFrames, let sv = findScrollView(in: self) {
+            hasLoggedFrames = true
+            NSLog("[KeyboardWrapper] === FRAME DEBUG ===")
+            NSLog("[KeyboardWrapper] wrapper.bounds: h=%.0f", bounds.height)
+            NSLog("[KeyboardWrapper] scrollView.frame: y=%.0f h=%.0f", sv.frame.origin.y, sv.frame.size.height)
+            NSLog("[KeyboardWrapper] safeAreaBottom=%.0f", safeAreaBottom)
+            if let window = window {
+                let svFrameInWindow = sv.convert(sv.bounds, to: window)
+                NSLog("[KeyboardWrapper] scrollView in window: y=%.0f h=%.0f bottom=%.0f", 
+                      svFrameInWindow.origin.y, svFrameInWindow.size.height, 
+                      window.bounds.height - svFrameInWindow.maxY)
+            }
+        }
         
         // Re-find composer if lost (weak reference might have been cleared)
         if composerView == nil || composerContainer == nil {
@@ -467,6 +488,9 @@ class KeyboardAwareWrapper: ExpoView, KeyboardAwareScrollHandlerDelegate {
             hasAttached = true
             #if DEBUG
             NSLog("[KeyboardWrapper] attached scrollView=%@", String(describing: type(of: sv)))
+            NSLog("[KeyboardWrapper] FRAMES: wrapper=%.0f,%.0f,%.0f,%.0f scrollView=%.0f,%.0f,%.0f,%.0f",
+                  bounds.origin.x, bounds.origin.y, bounds.size.width, bounds.size.height,
+                  sv.frame.origin.x, sv.frame.origin.y, sv.frame.size.width, sv.frame.size.height)
             #endif
         } else {
             // Will retry
@@ -488,6 +512,13 @@ class KeyboardAwareWrapper: ExpoView, KeyboardAwareScrollHandlerDelegate {
             
             // Initialize lastComposerHeight from the actual composer view (not container which includes padding)
             lastComposerHeight = comp.bounds.height
+            
+            #if DEBUG
+            if let cc = composerContainer {
+                NSLog("[KeyboardWrapper] composerContainer frame=%.0f,%.0f,%.0f,%.0f (depth=%d)",
+                      cc.frame.origin.x, cc.frame.origin.y, cc.frame.size.width, cc.frame.size.height, depth)
+            }
+            #endif
             
             // Apply initial transform (gap only, no keyboard)
             updateComposerTransform()
