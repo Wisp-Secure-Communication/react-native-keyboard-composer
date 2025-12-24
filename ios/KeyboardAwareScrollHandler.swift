@@ -35,6 +35,7 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
     override init() {
         super.init()
         setupKeyboardObservers()
+        NSLog("[ScrollHandler] ✅ Initialized - logging active")
     }
     
     deinit {
@@ -126,12 +127,16 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
         // Use raw UIView.animate with keyboard's exact animation curve
         let animationOptions = UIView.AnimationOptions(rawValue: curveValue << 16)
         
+        // When pinned, preserve scroll position during keyboard hide
+        // The new pin-to-top will handle positioning after content grows
+        let shouldPreservePosition = isPinned
+        
         UIView.animate(
             withDuration: duration,
             delay: 0,
             options: animationOptions,
             animations: {
-                self.updateContentInset()
+                self.updateContentInset(preserveScrollPosition: shouldPreservePosition)
             },
             completion: nil
         )
@@ -266,12 +271,13 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
                     
                     // When pinned, reduce runway as content fills it
                     // This keeps maxOffset = pinnedOffset, preserving natural scroll limits
+                    // IMPORTANT: Preserve scroll position to prevent snapping
                     if self.isPinned && self.runwayInset > 0 {
                         let newRunway = max(0, self.runwayInset - contentGrowth)
                         NSLog("[ScrollHandler] Reducing runway: %.0f -> %.0f (content grew %.0f)", 
                               self.runwayInset, newRunway, contentGrowth)
                         self.runwayInset = newRunway
-                        self.updateContentInset()
+                        self.updateContentInset(preserveScrollPosition: true)
                     }
                 }
             }
@@ -417,7 +423,19 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
         guard let sv = scrollView else { return }
         
         let viewportH = sv.bounds.height
-        let baseInset = sv.contentInset.bottom  // Current inset without runway
+        
+        // IMPORTANT: Calculate from BASE inset only (no runway)
+        // Otherwise old runway affects the calculation
+        let keyboardOpenPadding: CGFloat = 8
+        let freshBaseInset: CGFloat
+        if keyboardHeight > 0 {
+            freshBaseInset = baseBottomInset + keyboardHeight + keyboardOpenPadding
+        } else {
+            freshBaseInset = baseBottomInset + safeAreaBottom
+        }
+        
+        // Reset runway for fresh calculation
+        runwayInset = 0
         
         // Where the new message starts in content coordinates
         let newMessageY = contentSizeBeforeHide
@@ -426,9 +444,9 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
         let topPadding: CGFloat = 8
         let pinnedOffset = newMessageY - topPadding
         
-        // Current max offset WITHOUT runway
+        // Max offset with BASE inset only (no runway)
         let contentH = sv.contentSize.height
-        let currentMaxOffset = max(0, contentH - viewportH + baseInset)
+        let currentMaxOffset = max(0, contentH - viewportH + freshBaseInset)
         
         // How much extra inset we need to enable scrolling to pinnedOffset
         // If pinnedOffset > currentMaxOffset, we need runway
