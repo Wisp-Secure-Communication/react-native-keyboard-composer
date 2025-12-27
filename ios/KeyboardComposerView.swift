@@ -106,12 +106,6 @@ class KeyboardComposerView: ExpoView {
   private let sendButton = UIButton(type: .system)
   private let pttButton = UIButton(type: .system)
 
-  // Container for custom React Native views (when isCustomMode is true)
-  private let customContentContainer: UIView = {
-    let view = UIView()
-    view.backgroundColor = .clear
-    return view
-  }()
 
   // MARK: - Keyboard tracking
   private var currentKeyboardHeight: CGFloat = 0
@@ -196,10 +190,6 @@ class KeyboardComposerView: ExpoView {
 
     updateSendButtonState()
 
-    // Add custom content container (hidden by default, shown in custom mode)
-    blurView.contentView.addSubview(customContentContainer)
-    customContentContainer.isHidden = true
-
     // Emit initial height
     DispatchQueue.main.async { [weak self] in
       self?.onHeightChange(["height": self?.minHeight ?? 48])
@@ -210,23 +200,18 @@ class KeyboardComposerView: ExpoView {
 
   private func updateUIVisibility() {
     if isCustomMode {
-      // Hide native UI elements
-      textView.isHidden = true
-      placeholderLabel.isHidden = true
-      sendButton.isHidden = true
-      pttButton.isHidden = true
-
-      // Show custom content container
-      customContentContainer.isHidden = false
+      // Hide the entire blur view - custom mode provides only a frame
+      // React children are direct subviews and will be visible/interactive
+      blurView.isHidden = true
+      blurView.isUserInteractionEnabled = false
     } else {
-      // Show native UI elements
+      // Show blur view with native UI
+      blurView.isHidden = false
+      blurView.isUserInteractionEnabled = true
       textView.isHidden = false
       placeholderLabel.isHidden = text.isEmpty ? false : true
       sendButton.isHidden = false
       pttButton.isHidden = !showPTTButton
-
-      // Hide custom content container
-      customContentContainer.isHidden = true
     }
     setNeedsLayout()
   }
@@ -251,9 +236,8 @@ class KeyboardComposerView: ExpoView {
     // Blur fills entire view
     blurView.frame = bounds
 
-    // In custom mode, let React Native children fill the entire content area
+    // In custom mode, React children are direct subviews - React handles their layout
     if isCustomMode {
-      customContentContainer.frame = blurView.contentView.bounds
       return
     }
     
@@ -630,21 +614,13 @@ class KeyboardComposerView: ExpoView {
   // MARK: - React Native Subview Management
 
   override func insertReactSubview(_ subview: UIView!, at atIndex: Int) {
-    if isCustomMode {
-      // In custom mode, add children to the custom content container
-      customContentContainer.insertSubview(subview, at: atIndex)
-    } else {
-      // In native mode, use default behavior
-      super.insertReactSubview(subview, at: atIndex)
-    }
+    // Always use default behavior - React Native manages layout for its children
+    // In custom mode, blurView is hidden so React children are visible and interactive
+    super.insertReactSubview(subview, at: atIndex)
   }
 
   override func removeReactSubview(_ subview: UIView!) {
-    if isCustomMode {
-      subview.removeFromSuperview()
-    } else {
-      super.removeReactSubview(subview)
-    }
+    super.removeReactSubview(subview)
   }
 
   // MARK: - Trait changes (for dark/light mode updates)

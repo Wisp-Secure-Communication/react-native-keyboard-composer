@@ -137,7 +137,6 @@ class KeyboardComposerView(context: Context, appContext: AppContext) : ExpoView(
     private val editText: EditText
     private val sendButton: ImageButton
     private val pttButton: ImageButton
-    private val customContentContainer: FrameLayout
     private var currentHeight: Int = 0
     private var minHeightPx: Int = 0
     private var maxHeightPx: Int = 0
@@ -166,11 +165,6 @@ class KeyboardComposerView(context: Context, appContext: AppContext) : ExpoView(
                 }
             }
             clipToOutline = true
-        }
-
-        // Custom content container for React Native children (when isCustomMode is true)
-        customContentContainer = FrameLayout(context).apply {
-            visibility = View.GONE
         }
 
         editText = EditText(context).apply {
@@ -267,7 +261,6 @@ class KeyboardComposerView(context: Context, appContext: AppContext) : ExpoView(
         // Add views
         addView(backgroundView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         backgroundView.addView(editText, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
-        backgroundView.addView(customContentContainer, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
         addView(pttButton, LayoutParams(buttonSize, buttonSize).apply {
             gravity = Gravity.START or Gravity.CENTER_VERTICAL
@@ -304,21 +297,16 @@ class KeyboardComposerView(context: Context, appContext: AppContext) : ExpoView(
 
     private fun updateUIVisibility() {
         if (isCustomMode) {
-            // Hide native UI elements
-            editText.visibility = View.GONE
+            // Hide native UI - React children are direct subviews and will be visible
+            backgroundView.visibility = View.GONE
             sendButton.visibility = View.GONE
             pttButton.visibility = View.GONE
-
-            // Show custom content container
-            customContentContainer.visibility = View.VISIBLE
         } else {
-            // Show native UI elements
+            // Show background with native UI
+            backgroundView.visibility = View.VISIBLE
             editText.visibility = View.VISIBLE
             sendButton.visibility = View.VISIBLE
             pttButton.visibility = if (showPTTButton) View.VISIBLE else View.GONE
-
-            // Hide custom content container
-            customContentContainer.visibility = View.GONE
         }
         requestLayout()
     }
@@ -573,6 +561,11 @@ class KeyboardComposerView(context: Context, appContext: AppContext) : ExpoView(
         backgroundView.layout(0, 0, width, height)
         editText.layout(0, 0, width, height)
         
+        // In custom mode, React children are direct subviews - React handles their layout
+        if (isCustomMode) {
+            return
+        }
+        
         // Button Y position - centered within bottom minHeight zone
         val buttonTop = height - (minHeightPx / 2) - (buttonSize / 2)
         val buttonBottom = buttonTop + buttonSize
@@ -584,6 +577,14 @@ class KeyboardComposerView(context: Context, appContext: AppContext) : ExpoView(
         // Send button on right
         val sendLeft = width - buttonSize - buttonPadding / 2
         sendButton.layout(sendLeft, buttonTop, sendLeft + buttonSize, buttonBottom)
+    }
+
+    override fun onInterceptTouchEvent(ev: MotionEvent?): Boolean {
+        // In custom mode, don't intercept touches - let them pass through to React children
+        if (isCustomMode) {
+            return false
+        }
+        return super.onInterceptTouchEvent(ev)
     }
 
     fun focus() {
@@ -650,30 +651,5 @@ class KeyboardComposerView(context: Context, appContext: AppContext) : ExpoView(
     }
 
     // MARK: - React Native Subview Management
-
-    override fun addView(child: View?, index: Int, params: ViewGroup.LayoutParams?) {
-        // Track if this is one of our native UI elements
-        val isNativeElement = child == backgroundView || child == editText ||
-                             child == sendButton || child == pttButton ||
-                             child == customContentContainer
-
-        if (isNativeElement) {
-            // Allow native elements to be added normally
-            super.addView(child, index, params)
-        } else if (isCustomMode) {
-            // In custom mode, add React Native children to the custom content container
-            customContentContainer.addView(child, params)
-        } else {
-            // In native mode, use default behavior
-            super.addView(child, index, params)
-        }
-    }
-
-    override fun removeView(view: View?) {
-        if (view?.parent == customContentContainer) {
-            customContentContainer.removeView(view)
-        } else {
-            super.removeView(view)
-        }
-    }
+    // React Native children are always direct subviews - React handles layout and touches
 }

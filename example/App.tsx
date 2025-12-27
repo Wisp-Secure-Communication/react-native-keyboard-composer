@@ -333,6 +333,7 @@ function ChatScreen() {
                 { height: composerHeight },
                 maxContentWidth ? { width: maxContentWidth } : undefined,
               ]}
+              pointerEvents="box-none"
             >
               {isCustomMode ? (
                 <KeyboardComposer
