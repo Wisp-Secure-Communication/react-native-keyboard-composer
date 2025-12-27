@@ -58,20 +58,36 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
               let curveValue = userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt
         else { return }
         
-        let newKeyboardHeight = keyboardFrame.height
+        // Calculate effective keyboard height (keyboard frame is in screen coordinates)
+        let screenHeight = UIScreen.main.bounds.height
+        let keyboardTop = keyboardFrame.origin.y
+        let newKeyboardHeight = max(0, screenHeight - keyboardTop)
         
-        // Only do scroll-to-bottom logic on INITIAL keyboard show, not on subsequent height changes
-        let isInitialShow = !isKeyboardVisible
-        isKeyboardVisible = true
+        #if DEBUG
+        NSLog("[ScrollHandler] keyboard show: frame=%.0f newHeight=%.0f wasVisible=%@", 
+              keyboardFrame.height, newKeyboardHeight, isKeyboardVisible ? "yes" : "no")
+        #endif
         
-        // Check if at bottom BEFORE animation (only on initial show)
+        // With inputAccessoryView, we get notifications for just the accessory (~90pt)
+        // before the actual keyboard shows (~300+pt). Only treat it as "initial show"
+        // when we go from no keyboard to actual keyboard (not just accessory)
+        let minRealKeyboardHeight: CGFloat = 200  // Real keyboards are at least 200pt
+        let isRealKeyboard = newKeyboardHeight >= minRealKeyboardHeight
+        let wasRealKeyboardVisible = isKeyboardVisible && keyboardHeight >= minRealKeyboardHeight
+        let isInitialShow = isRealKeyboard && !wasRealKeyboardVisible
+        
+        // Check if at bottom BEFORE animation (only on initial real keyboard show)
         if isInitialShow {
             wasAtBottom = isNearBottom(scrollView)
+            #if DEBUG
+            NSLog("[ScrollHandler] initial keyboard show, wasAtBottom=%@", wasAtBottom ? "yes" : "no")
+            #endif
         }
+        
+        isKeyboardVisible = true
         keyboardHeight = newKeyboardHeight
         
         // Use raw UIView.animate with keyboard's exact animation curve
-        // The curve value (7) is converted to animation options by shifting left 16 bits
         let animationOptions = UIView.AnimationOptions(rawValue: curveValue << 16)
         
         UIView.animate(
@@ -86,8 +102,7 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
                 if isInitialShow && self.wasAtBottom {
                     let contentHeight = scrollView.contentSize.height
                     let scrollViewHeight = scrollView.bounds.height
-                    let keyboardOpenPadding: CGFloat = 8
-                    let bottomInset = self.baseBottomInset + self.keyboardHeight + keyboardOpenPadding
+                    let bottomInset = scrollView.contentInset.bottom
                     let maxOffset = max(0, contentHeight - scrollViewHeight + bottomInset)
                     scrollView.contentOffset = CGPoint(x: 0, y: maxOffset)
                 }
@@ -102,10 +117,13 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
               let curveValue = userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt
         else { return }
         
-        keyboardHeight = 0
-        isKeyboardVisible = false  // Reset flag when keyboard hides
+        #if DEBUG
+        NSLog("[ScrollHandler] keyboard hide")
+        #endif
         
-        // Use raw UIView.animate with keyboard's exact animation curve
+        keyboardHeight = 0
+        isKeyboardVisible = false
+        
         let animationOptions = UIView.AnimationOptions(rawValue: curveValue << 16)
         
         UIView.animate(
@@ -136,18 +154,15 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
         // Save current scroll position if we need to preserve it
         let savedOffset = preserveScrollPosition ? scrollView.contentOffset : nil
         
-        // The composer's paddingBottom from animatedPaddingStyle:
-        // - Keyboard closed: safeAreaBottom + Spacing.sm
-        // - Keyboard open: Spacing.sm (8)
-        let keyboardOpenPadding: CGFloat = 8  // Spacing.sm from JS
-        
         let totalInset: CGFloat
         if keyboardHeight > 0 {
-            // Keyboard open: base + keyboard + small padding
-            totalInset = baseBottomInset + keyboardHeight + keyboardOpenPadding
+            // Keyboard open: keyboardHeight already includes full covered area
+            // (keyboard + inputAccessory if present)
+            // Add small gap for visual breathing room
+            totalInset = keyboardHeight + 8
         } else {
-            // Keyboard closed: base + safe area
-            totalInset = baseBottomInset + safeAreaBottom
+            // Keyboard closed: base (composer) + safe area + gap
+            totalInset = baseBottomInset + safeAreaBottom + 8
         }
         
         scrollView.contentInset.bottom = totalInset
@@ -178,6 +193,10 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
     func attach(to scrollView: UIScrollView) {
         self.scrollView = scrollView
         scrollView.delegate = self
+        
+        // Disable automatic content inset adjustment - we manage it ourselves
+        scrollView.contentInsetAdjustmentBehavior = .never
+        
         updateContentInset()
 
         // Enable interactive keyboard dismissal via swipe
