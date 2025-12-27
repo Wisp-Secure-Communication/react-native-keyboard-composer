@@ -357,6 +357,14 @@ function ChatScreen() {
                       value={customText}
                       onChangeText={setCustomText}
                       multiline
+                      onContentSizeChange={(e) => {
+                        const contentHeight = e.nativeEvent.contentSize.height;
+                        const newHeight = Math.min(
+                          Math.max(contentHeight + 16, constants.defaultMinHeight),
+                          constants.defaultMaxHeight
+                        );
+                        handleHeightChange(newHeight);
+                      }}
                     />
                     <View style={styles.customButtons}>
                       <TouchableOpacity
