@@ -126,11 +126,18 @@ class KeyboardComposerView(context: Context, appContext: AppContext) : ExpoView(
             field = value
         }
 
+    var isCustomMode: Boolean = false
+        set(value) {
+            field = value
+            updateUIVisibility()
+        }
+
     // MARK: - UI Elements
     private val backgroundView: FrameLayout
     private val editText: EditText
     private val sendButton: ImageButton
     private val pttButton: ImageButton
+    private val customContentContainer: FrameLayout
     private var currentHeight: Int = 0
     private var minHeightPx: Int = 0
     private var maxHeightPx: Int = 0
@@ -159,6 +166,11 @@ class KeyboardComposerView(context: Context, appContext: AppContext) : ExpoView(
                 }
             }
             clipToOutline = true
+        }
+
+        // Custom content container for React Native children (when isCustomMode is true)
+        customContentContainer = FrameLayout(context).apply {
+            visibility = View.GONE
         }
 
         editText = EditText(context).apply {
@@ -255,12 +267,13 @@ class KeyboardComposerView(context: Context, appContext: AppContext) : ExpoView(
         // Add views
         addView(backgroundView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         backgroundView.addView(editText, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
-        
+        backgroundView.addView(customContentContainer, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+
         addView(pttButton, LayoutParams(buttonSize, buttonSize).apply {
             gravity = Gravity.START or Gravity.CENTER_VERTICAL
             marginStart = buttonPadding / 2
         })
-        
+
         addView(sendButton, LayoutParams(buttonSize, buttonSize).apply {
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
             marginEnd = buttonPadding / 2
@@ -288,7 +301,28 @@ class KeyboardComposerView(context: Context, appContext: AppContext) : ExpoView(
         val rightPadding = buttonSize + buttonPadding / 2
         editText.setPadding(leftPadding, dpToPx(14f), rightPadding, dpToPx(14f))
     }
-    
+
+    private fun updateUIVisibility() {
+        if (isCustomMode) {
+            // Hide native UI elements
+            editText.visibility = View.GONE
+            sendButton.visibility = View.GONE
+            pttButton.visibility = View.GONE
+
+            // Show custom content container
+            customContentContainer.visibility = View.VISIBLE
+        } else {
+            // Show native UI elements
+            editText.visibility = View.VISIBLE
+            sendButton.visibility = View.VISIBLE
+            pttButton.visibility = if (showPTTButton) View.VISIBLE else View.GONE
+
+            // Hide custom content container
+            customContentContainer.visibility = View.GONE
+        }
+        requestLayout()
+    }
+
     @SuppressLint("ClickableViewAccessibility")
     private fun setupEditTextTouchHandling() {
         editText.setOnTouchListener { v, event ->
@@ -613,5 +647,33 @@ class KeyboardComposerView(context: Context, appContext: AppContext) : ExpoView(
         // light: systemGray6Light = #F2F2F7
         // dark:  systemGray6Dark  = #1C1C1E
         return if (isDarkMode()) Color.parseColor("#1C1C1E") else Color.parseColor("#F2F2F7")
+    }
+
+    // MARK: - React Native Subview Management
+
+    override fun addView(child: View?, index: Int, params: ViewGroup.LayoutParams?) {
+        // Track if this is one of our native UI elements
+        val isNativeElement = child == backgroundView || child == editText ||
+                             child == sendButton || child == pttButton ||
+                             child == customContentContainer
+
+        if (isNativeElement) {
+            // Allow native elements to be added normally
+            super.addView(child, index, params)
+        } else if (isCustomMode) {
+            // In custom mode, add React Native children to the custom content container
+            customContentContainer.addView(child, params)
+        } else {
+            // In native mode, use default behavior
+            super.addView(child, index, params)
+        }
+    }
+
+    override fun removeView(view: View?) {
+        if (view?.parent == customContentContainer) {
+            customContentContainer.removeView(view)
+        } else {
+            super.removeView(view)
+        }
     }
 }

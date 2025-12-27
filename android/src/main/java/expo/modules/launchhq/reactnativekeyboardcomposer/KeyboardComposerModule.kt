@@ -13,6 +13,10 @@ class KeyboardComposerModule : Module() {
 
         // KeyboardComposerView
         View(KeyboardComposerView::class) {
+            Prop("isCustomMode") { view: KeyboardComposerView, value: Boolean ->
+                view.isCustomMode = value
+            }
+
             Prop("placeholder") { view: KeyboardComposerView, value: String ->
                 view.placeholderText = value
             }

@@ -33,6 +33,7 @@ const KeyboardComposerView = forwardRef<
   KeyboardComposerProps
 >((props, ref) => {
     const {
+      children,
       onChangeText,
       onSend,
       onStop,
@@ -45,6 +46,9 @@ const KeyboardComposerView = forwardRef<
       onPTTPressOut,
       ...rest
     } = props;
+
+  // Determine if we're in custom mode
+  const isCustomMode = children != null;
 
   // Expose methods to parent via ref (placeholder for future native method support)
     useImperativeHandle(ref, () => ({
@@ -114,6 +118,7 @@ const KeyboardComposerView = forwardRef<
 
     return (
       <NativeView
+        isCustomMode={isCustomMode}
         onChangeText={handleChangeText}
         onSend={handleSend}
         onStop={handleStop}
@@ -125,7 +130,9 @@ const KeyboardComposerView = forwardRef<
         onPTTPressIn={handlePTTPressIn}
         onPTTPressOut={handlePTTPressOut}
         {...rest}
-      />
+      >
+        {children}
+      </NativeView>
     );
 });
 

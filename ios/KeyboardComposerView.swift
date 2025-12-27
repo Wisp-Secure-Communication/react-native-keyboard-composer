@@ -75,6 +75,12 @@ class KeyboardComposerView: ExpoView {
   var pttPressedScale: CGFloat = 0.92
   var pttPressedOpacity: CGFloat = 0.85
 
+  var isCustomMode: Bool = false {
+    didSet {
+      updateUIVisibility()
+    }
+  }
+
   // MARK: - Events (sent to JS)
   let onChangeText = EventDispatcher()
   let onSend = EventDispatcher()
@@ -99,6 +105,13 @@ class KeyboardComposerView: ExpoView {
   private let placeholderLabel = UILabel()
   private let sendButton = UIButton(type: .system)
   private let pttButton = UIButton(type: .system)
+
+  // Container for custom React Native views (when isCustomMode is true)
+  private let customContentContainer: UIView = {
+    let view = UIView()
+    view.backgroundColor = .clear
+    return view
+  }()
 
   // MARK: - Keyboard tracking
   private var currentKeyboardHeight: CGFloat = 0
@@ -182,11 +195,40 @@ class KeyboardComposerView: ExpoView {
     updateButtonAppearance()
 
     updateSendButtonState()
-    
+
+    // Add custom content container (hidden by default, shown in custom mode)
+    blurView.contentView.addSubview(customContentContainer)
+    customContentContainer.isHidden = true
+
     // Emit initial height
     DispatchQueue.main.async { [weak self] in
       self?.onHeightChange(["height": self?.minHeight ?? 48])
     }
+  }
+
+  // MARK: - Custom Mode Support
+
+  private func updateUIVisibility() {
+    if isCustomMode {
+      // Hide native UI elements
+      textView.isHidden = true
+      placeholderLabel.isHidden = true
+      sendButton.isHidden = true
+      pttButton.isHidden = true
+
+      // Show custom content container
+      customContentContainer.isHidden = false
+    } else {
+      // Show native UI elements
+      textView.isHidden = false
+      placeholderLabel.isHidden = text.isEmpty ? false : true
+      sendButton.isHidden = false
+      pttButton.isHidden = !showPTTButton
+
+      // Hide custom content container
+      customContentContainer.isHidden = true
+    }
+    setNeedsLayout()
   }
 
   private func configureBlurEffect() {
@@ -203,11 +245,17 @@ class KeyboardComposerView: ExpoView {
 
   override func layoutSubviews() {
     super.layoutSubviews()
-    
+
     guard bounds.width > 0, bounds.height > 0 else { return }
-    
+
     // Blur fills entire view
     blurView.frame = bounds
+
+    // In custom mode, let React Native children fill the entire content area
+    if isCustomMode {
+      customContentContainer.frame = blurView.contentView.bounds
+      return
+    }
     
     // Button Y position - centered within the bottom minHeight zone
     // Formula: bounds.height - (minHeight / 2) - (buttonSize / 2)
@@ -579,10 +627,30 @@ class KeyboardComposerView: ExpoView {
     onChangeText(["text": ""])
   }
 
+  // MARK: - React Native Subview Management
+
+  override func insertReactSubview(_ subview: UIView!, at atIndex: Int) {
+    if isCustomMode {
+      // In custom mode, add children to the custom content container
+      customContentContainer.insertSubview(subview, at: atIndex)
+    } else {
+      // In native mode, use default behavior
+      super.insertReactSubview(subview, at: atIndex)
+    }
+  }
+
+  override func removeReactSubview(_ subview: UIView!) {
+    if isCustomMode {
+      subview.removeFromSuperview()
+    } else {
+      super.removeReactSubview(subview)
+    }
+  }
+
   // MARK: - Trait changes (for dark/light mode updates)
   override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
     super.traitCollectionDidChange(previousTraitCollection)
-    
+
     if traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection) {
       // Update PTT button for new appearance
       updatePTTButtonAppearance()

@@ -179,7 +179,10 @@ class KeyboardAwareScrollHandler: NSObject, UIGestureRecognizerDelegate, UIScrol
         self.scrollView = scrollView
         scrollView.delegate = self
         updateContentInset()
-        
+
+        // Enable interactive keyboard dismissal via swipe
+        scrollView.keyboardDismissMode = .interactive
+
         // Add tap gesture to dismiss keyboard
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
         tap.cancelsTouchesInView = false // Allow other touches to pass through
