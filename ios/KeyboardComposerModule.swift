@@ -14,6 +14,10 @@ public class KeyboardComposerModule: Module {
     // Composer View definition
     View(KeyboardComposerView.self) {
       // Props
+      Prop("isCustomMode") { (view: KeyboardComposerView, value: Bool) in
+        view.isCustomMode = value
+      }
+
       Prop("placeholder") { (view: KeyboardComposerView, value: String) in
         view.placeholder = value
       }

@@ -75,6 +75,12 @@ class KeyboardComposerView: ExpoView {
   var pttPressedScale: CGFloat = 0.92
   var pttPressedOpacity: CGFloat = 0.85
 
+  var isCustomMode: Bool = false {
+    didSet {
+      updateUIVisibility()
+    }
+  }
+
   // MARK: - Events (sent to JS)
   let onChangeText = EventDispatcher()
   let onSend = EventDispatcher()
@@ -99,6 +105,7 @@ class KeyboardComposerView: ExpoView {
   private let placeholderLabel = UILabel()
   private let sendButton = UIButton(type: .system)
   private let pttButton = UIButton(type: .system)
+
 
   // MARK: - Keyboard tracking
   private var currentKeyboardHeight: CGFloat = 0
@@ -182,11 +189,31 @@ class KeyboardComposerView: ExpoView {
     updateButtonAppearance()
 
     updateSendButtonState()
-    
+
     // Emit initial height
     DispatchQueue.main.async { [weak self] in
       self?.onHeightChange(["height": self?.minHeight ?? 48])
     }
+  }
+
+  // MARK: - Custom Mode Support
+
+  private func updateUIVisibility() {
+    if isCustomMode {
+      // Hide the entire blur view - custom mode provides only a frame
+      // React children are direct subviews and will be visible/interactive
+      blurView.isHidden = true
+      blurView.isUserInteractionEnabled = false
+    } else {
+      // Show blur view with native UI
+      blurView.isHidden = false
+      blurView.isUserInteractionEnabled = true
+      textView.isHidden = false
+      placeholderLabel.isHidden = text.isEmpty ? false : true
+      sendButton.isHidden = false
+      pttButton.isHidden = !showPTTButton
+    }
+    setNeedsLayout()
   }
 
   private func configureBlurEffect() {
@@ -203,11 +230,16 @@ class KeyboardComposerView: ExpoView {
 
   override func layoutSubviews() {
     super.layoutSubviews()
-    
+
     guard bounds.width > 0, bounds.height > 0 else { return }
-    
+
     // Blur fills entire view
     blurView.frame = bounds
+
+    // In custom mode, React children are direct subviews - React handles their layout
+    if isCustomMode {
+      return
+    }
     
     // Button Y position - centered within the bottom minHeight zone
     // Formula: bounds.height - (minHeight / 2) - (buttonSize / 2)
@@ -579,10 +611,22 @@ class KeyboardComposerView: ExpoView {
     onChangeText(["text": ""])
   }
 
+  // MARK: - React Native Subview Management
+
+  override func insertReactSubview(_ subview: UIView!, at atIndex: Int) {
+    // Always use default behavior - React Native manages layout for its children
+    // In custom mode, blurView is hidden so React children are visible and interactive
+    super.insertReactSubview(subview, at: atIndex)
+  }
+
+  override func removeReactSubview(_ subview: UIView!) {
+    super.removeReactSubview(subview)
+  }
+
   // MARK: - Trait changes (for dark/light mode updates)
   override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
     super.traitCollectionDidChange(previousTraitCollection)
-    
+
     if traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection) {
       // Update PTT button for new appearance
       updatePTTButtonAppearance()

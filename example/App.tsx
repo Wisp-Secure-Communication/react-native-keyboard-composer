@@ -6,6 +6,8 @@ import {
   useColorScheme,
   ScrollView,
   StatusBar,
+  TouchableOpacity,
+  TextInput,
 } from "react-native";
 import {
   SafeAreaProvider,
@@ -135,6 +137,8 @@ function ChatScreen() {
   const [composerHeight, setComposerHeight] = useState(
     constants.defaultMinHeight
   );
+  const [isCustomMode, setIsCustomMode] = useState(false);
+  const [customText, setCustomText] = useState("");
 
   const handleHeightChange = useCallback((height: number) => {
     setComposerHeight(height);
@@ -167,6 +171,11 @@ function ChatScreen() {
     setMessages((prev) => [...prev, userMessage]);
     setTimeout(() => setScrollTrigger(Date.now()), 100);
 
+    // Clear custom text if in custom mode
+    if (isCustomMode) {
+      setCustomText("");
+    }
+
     // Simulate assistant response
     setTimeout(() => {
       const responses = [
@@ -184,7 +193,13 @@ function ChatScreen() {
       setMessages((prev) => [...prev, assistantMessage]);
       setTimeout(() => setScrollTrigger(Date.now()), 100);
     }, 1000);
-  }, []);
+  }, [isCustomMode]);
+
+  const handleCustomSend = useCallback(() => {
+    if (customText.trim()) {
+      handleSend(customText);
+    }
+  }, [customText, handleSend]);
 
   const renderMessage = (item: Message) => {
     const isUser = item.role === "user";
@@ -244,22 +259,44 @@ function ChatScreen() {
 
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <Text
-          style={[
-            styles.headerTitle,
-            { color: isDark ? "#fff" : "#000", fontSize: scaleFont(17) },
-          ]}
-        >
-          Keyboard Composer Example
-        </Text>
-        <Text
-          style={[
-            styles.headerSubtitle,
-            { color: colors.timestamp, fontSize: scaleFont(12) },
-          ]}
-        >
-          Content-aware keyboard handling
-        </Text>
+        <View style={styles.headerContent}>
+          <View style={styles.headerTextContainer}>
+            <Text
+              style={[
+                styles.headerTitle,
+                { color: isDark ? "#fff" : "#000", fontSize: scaleFont(17) },
+              ]}
+            >
+              Keyboard Composer Example
+            </Text>
+            <Text
+              style={[
+                styles.headerSubtitle,
+                { color: colors.timestamp, fontSize: scaleFont(12) },
+              ]}
+            >
+              {isCustomMode ? "Custom Mode" : "Native Mode"}
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={[
+              styles.toggleButton,
+              {
+                backgroundColor: isCustomMode ? "#007AFF" : isDark ? "#2c2c2e" : "#e9e9eb",
+              },
+            ]}
+            onPress={() => setIsCustomMode(!isCustomMode)}
+          >
+            <Text
+              style={[
+                styles.toggleButtonText,
+                { color: isCustomMode ? "#fff" : isDark ? "#fff" : "#000" },
+              ]}
+            >
+              {isCustomMode ? "Custom" : "Native"}
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* KeyboardAwareWrapper manages both scroll content AND composer animation */}
@@ -296,20 +333,84 @@ function ChatScreen() {
                 { height: composerHeight },
                 maxContentWidth ? { width: maxContentWidth } : undefined,
               ]}
+              pointerEvents="box-none"
             >
-              <KeyboardComposer
-                placeholder="Type a message..."
-                onSend={handleSend}
-                onHeightChange={handleHeightChange}
-                minHeight={constants.defaultMinHeight}
-                maxHeight={constants.defaultMaxHeight}
-                sendButtonEnabled={true}
-                showPTTButton={true}
-                onPTTPress={() => console.log("PTT tapped")}
-                onPTTPressIn={() => console.log("PTT press started")}
-                onPTTPressOut={() => console.log("PTT press ended")}
-                style={{ flex: 1 }}
-              />
+              {isCustomMode ? (
+                <KeyboardComposer
+                  onHeightChange={handleHeightChange}
+                  minHeight={constants.defaultMinHeight}
+                  maxHeight={constants.defaultMaxHeight}
+                  style={{ flex: 1 }}
+                >
+                  <View
+                    style={[
+                      styles.customComposer,
+                      { backgroundColor: isDark ? "#1C1C1E" : "#F2F2F7" },
+                    ]}
+                  >
+                    <TextInput
+                      style={[
+                        styles.customInput,
+                        { color: isDark ? "#fff" : "#000" },
+                      ]}
+                      placeholder="Custom composer..."
+                      placeholderTextColor={isDark ? "#8e8e93" : "#8e8e93"}
+                      value={customText}
+                      onChangeText={setCustomText}
+                      multiline
+                      onContentSizeChange={(e) => {
+                        const contentHeight = e.nativeEvent.contentSize.height;
+                        const newHeight = Math.min(
+                          Math.max(contentHeight + 16, constants.defaultMinHeight),
+                          constants.defaultMaxHeight
+                        );
+                        handleHeightChange(newHeight);
+                      }}
+                    />
+                    <View style={styles.customButtons}>
+                      <TouchableOpacity
+                        style={[
+                          styles.customButton,
+                          { backgroundColor: "#34C759" },
+                        ]}
+                        onPress={() => console.log("Custom PTT")}
+                      >
+                        <Text style={styles.customButtonText}>🎤</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          styles.customButton,
+                          {
+                            backgroundColor: customText.trim()
+                              ? "#007AFF"
+                              : isDark
+                              ? "#2c2c2e"
+                              : "#e9e9eb",
+                          },
+                        ]}
+                        onPress={handleCustomSend}
+                        disabled={!customText.trim()}
+                      >
+                        <Text style={styles.customButtonText}>➤</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </KeyboardComposer>
+              ) : (
+                <KeyboardComposer
+                  placeholder="Type a message..."
+                  onSend={handleSend}
+                  onHeightChange={handleHeightChange}
+                  minHeight={constants.defaultMinHeight}
+                  maxHeight={constants.defaultMaxHeight}
+                  sendButtonEnabled={true}
+                  showPTTButton={true}
+                  onPTTPress={() => console.log("PTT tapped")}
+                  onPTTPressIn={() => console.log("PTT press started")}
+                  onPTTPressOut={() => console.log("PTT press ended")}
+                  style={{ flex: 1 }}
+                />
+              )}
             </View>
           </View>
         </View>
@@ -336,6 +437,14 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "#e5e5e5",
   },
+  headerContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  headerTextContainer: {
+    flex: 1,
+  },
   headerTitle: {
     fontWeight: "600",
     textAlign: "center",
@@ -343,6 +452,16 @@ const styles = StyleSheet.create({
   headerSubtitle: {
     textAlign: "center",
     marginTop: 2,
+  },
+  toggleButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 16,
+    marginLeft: 12,
+  },
+  toggleButtonText: {
+    fontSize: 14,
+    fontWeight: "600",
   },
   chatArea: {
     flex: 1,
@@ -395,5 +514,36 @@ const styles = StyleSheet.create({
   },
   composerWrapper: {
     // Native blur view handles its own corner radius
+  },
+  // Custom composer styles
+  customComposer: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "flex-end",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 24,
+  },
+  customInput: {
+    flex: 1,
+    fontSize: 16,
+    paddingVertical: 8,
+    maxHeight: 100,
+  },
+  customButtons: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginLeft: 8,
+  },
+  customButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  customButtonText: {
+    fontSize: 18,
   },
 });
