@@ -126,6 +126,12 @@ class KeyboardComposerView(context: Context, appContext: AppContext) : ExpoView(
             field = value
         }
 
+    var isCustomMode: Boolean = false
+        set(value) {
+            field = value
+            updateUIVisibility()
+        }
+
     // MARK: - UI Elements
     private val backgroundView: FrameLayout
     private val editText: EditText
@@ -255,12 +261,12 @@ class KeyboardComposerView(context: Context, appContext: AppContext) : ExpoView(
         // Add views
         addView(backgroundView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         backgroundView.addView(editText, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
-        
+
         addView(pttButton, LayoutParams(buttonSize, buttonSize).apply {
             gravity = Gravity.START or Gravity.CENTER_VERTICAL
             marginStart = buttonPadding / 2
         })
-        
+
         addView(sendButton, LayoutParams(buttonSize, buttonSize).apply {
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
             marginEnd = buttonPadding / 2
@@ -288,7 +294,23 @@ class KeyboardComposerView(context: Context, appContext: AppContext) : ExpoView(
         val rightPadding = buttonSize + buttonPadding / 2
         editText.setPadding(leftPadding, dpToPx(14f), rightPadding, dpToPx(14f))
     }
-    
+
+    private fun updateUIVisibility() {
+        if (isCustomMode) {
+            // Hide native UI - React children are direct subviews and will be visible
+            backgroundView.visibility = View.GONE
+            sendButton.visibility = View.GONE
+            pttButton.visibility = View.GONE
+        } else {
+            // Show background with native UI
+            backgroundView.visibility = View.VISIBLE
+            editText.visibility = View.VISIBLE
+            sendButton.visibility = View.VISIBLE
+            pttButton.visibility = if (showPTTButton) View.VISIBLE else View.GONE
+        }
+        requestLayout()
+    }
+
     @SuppressLint("ClickableViewAccessibility")
     private fun setupEditTextTouchHandling() {
         editText.setOnTouchListener { v, event ->
@@ -539,6 +561,11 @@ class KeyboardComposerView(context: Context, appContext: AppContext) : ExpoView(
         backgroundView.layout(0, 0, width, height)
         editText.layout(0, 0, width, height)
         
+        // In custom mode, React children are direct subviews - React handles their layout
+        if (isCustomMode) {
+            return
+        }
+        
         // Button Y position - centered within bottom minHeight zone
         val buttonTop = height - (minHeightPx / 2) - (buttonSize / 2)
         val buttonBottom = buttonTop + buttonSize
@@ -550,6 +577,14 @@ class KeyboardComposerView(context: Context, appContext: AppContext) : ExpoView(
         // Send button on right
         val sendLeft = width - buttonSize - buttonPadding / 2
         sendButton.layout(sendLeft, buttonTop, sendLeft + buttonSize, buttonBottom)
+    }
+
+    override fun onInterceptTouchEvent(ev: MotionEvent?): Boolean {
+        // In custom mode, don't intercept touches - let them pass through to React children
+        if (isCustomMode) {
+            return false
+        }
+        return super.onInterceptTouchEvent(ev)
     }
 
     fun focus() {
@@ -614,4 +649,7 @@ class KeyboardComposerView(context: Context, appContext: AppContext) : ExpoView(
         // dark:  systemGray6Dark  = #1C1C1E
         return if (isDarkMode()) Color.parseColor("#1C1C1E") else Color.parseColor("#F2F2F7")
     }
+
+    // MARK: - React Native Subview Management
+    // React Native children are always direct subviews - React handles layout and touches
 }

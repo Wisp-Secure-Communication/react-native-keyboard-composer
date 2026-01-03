@@ -1,37 +1,143 @@
 import ExpoModulesCore
 import UIKit
 
+// MARK: - Input Accessory Host Controller
+
+/// Controller that hosts the composer as an inputAccessoryView.
+/// This provides proper interactive dismiss - dragging on the composer dismisses the keyboard.
+class InputAccessoryHostController: UIViewController {
+    
+    private let accessoryContainer = InputAccessoryContainerView()
+    
+    override var canBecomeFirstResponder: Bool { true }
+    
+    override var inputAccessoryView: UIView? { accessoryContainer }
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .clear
+        view.isUserInteractionEnabled = false
+    }
+    
+    /// Set the composer view to be displayed in the input accessory
+    func setComposerView(_ composer: UIView) {
+        accessoryContainer.setComposer(composer)
+    }
+    
+    /// Update the accessory height when composer size changes
+    func updateHeight() {
+        accessoryContainer.invalidateIntrinsicContentSize()
+    }
+}
+
+// MARK: - Input Accessory Container View
+
+/// Container view for the composer that provides proper intrinsic content size
+/// Handles safe area insets and keyboard gap padding
+class InputAccessoryContainerView: UIView {
+    
+    private weak var composerView: UIView?
+    
+    // Padding between composer and keyboard
+    private let keyboardGap: CGFloat = 8
+    // Minimum padding at bottom when keyboard is closed (in addition to safe area)
+    private let bottomPadding: CGFloat = 8
+    
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        autoresizingMask = .flexibleHeight
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    func setComposer(_ composer: UIView) {
+        // Remove old composer if any
+        composerView?.removeFromSuperview()
+        
+        // Add new composer
+        composerView = composer
+        addSubview(composer)
+        
+        invalidateIntrinsicContentSize()
+    }
+    
+    override var intrinsicContentSize: CGSize {
+        let composerHeight = composerView?.bounds.height ?? 48
+        // Include safe area at bottom + padding + keyboard gap
+        let safeBottom = safeAreaInsets.bottom
+        // When keyboard is closed: safe area + bottom padding
+        // When keyboard is open: keyboard gap (safe area will be 0 above keyboard)
+        let bottomSpace = max(safeBottom + bottomPadding, keyboardGap)
+        let totalHeight = composerHeight + bottomSpace
+        return CGSize(width: UIView.noIntrinsicMetric, height: totalHeight)
+    }
+    
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        
+        guard let composer = composerView else { return }
+        
+        // Position composer at top, leaving space at bottom for safe area/keyboard gap
+        composer.frame = CGRect(
+            x: 0,
+            y: 0,
+            width: bounds.width,
+            height: composer.bounds.height
+        )
+    }
+    
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        // Forward all touches to children
+        let result = super.hitTest(point, with: event)
+        return result == self ? nil : result
+    }
+    
+    override func safeAreaInsetsDidChange() {
+        super.safeAreaInsetsDidChange()
+        invalidateIntrinsicContentSize()
+        setNeedsLayout()
+    }
+}
+
+// MARK: - Keyboard Aware Wrapper
+
 /// A native wrapper view that finds UIScrollView children and attaches keyboard handling.
-/// Also finds and animates the composer container with the keyboard.
+/// Uses inputAccessoryView pattern for proper interactive dismiss support.
 class KeyboardAwareWrapper: ExpoView, KeyboardAwareScrollHandlerDelegate {
     private let keyboardHandler = KeyboardAwareScrollHandler()
     private var hasAttached = false
     private var scrollToBottomButton: UIButton?
     private var isScrollButtonVisible = false
-    private var isAnimatingScrollButton = false  // Prevents transform updates during show/hide
+    private var isAnimatingScrollButton = false
     private var currentKeyboardHeight: CGFloat = 0
-    private var isKeyboardOpen = false  // Track true keyboard state via show/hide notifications
+    private var isKeyboardOpen = false
     
-    // Composer handling (like Android)
+    // Input accessory controller for proper keyboard attachment
+    private var accessoryController: InputAccessoryHostController?
+    private var isUsingInputAccessory = false
+    private weak var originalComposerSuperview: UIView?
+    private var originalComposerIndex: Int = 0
+    
+    // Composer handling
     private weak var composerContainer: UIView?
-    private weak var composerView: UIView?  // The actual KeyboardComposerView for height measurement
+    private weak var composerView: UIView?
     private var safeAreaBottom: CGFloat = 0
     
-    // Track composer height to detect changes (since props may not trigger observers with Fabric)
+    // Track composer height to detect changes
     private var lastComposerHeight: CGFloat = 0
     
-    // Constants matching Android
-    private let CONTENT_GAP: CGFloat = 24
-    private let COMPOSER_KEYBOARD_GAP: CGFloat = 10
-    private let MIN_BOTTOM_PADDING: CGFloat = 16  // Minimum padding when keyboard closed
+    // Constants - minimal since inputAccessoryView handles padding
+    private let CONTENT_GAP: CGFloat = 0  // Accessory handles its own padding
+    private let COMPOSER_KEYBOARD_GAP: CGFloat = 8
     
     // KVO observations
     private var extraBottomInsetObservation: NSKeyValueObservation?
     private var scrollToTopTriggerObservation: NSKeyValueObservation?
     
     // Base inset: composer height only (from JS)
-    // Gap and safe area are handled natively
-    // Using @objc dynamic to enable KVO - required because React Native/Expo sets props via Objective-C KVC
     @objc dynamic var extraBottomInset: CGFloat = 48
     
     /// Trigger scroll to top when this value changes (use timestamp/counter from JS)
@@ -53,6 +159,10 @@ class KeyboardAwareWrapper: ExpoView, KeyboardAwareScrollHandlerDelegate {
         NotificationCenter.default.removeObserver(self)
         extraBottomInsetObservation?.invalidate()
         scrollToTopTriggerObservation?.invalidate()
+        
+        // Restore composer to original parent if needed
+        restoreComposerFromAccessory()
+        accessoryController?.resignFirstResponder()
     }
     
     // MARK: - Property Observers (KVO)
@@ -121,37 +231,16 @@ class KeyboardAwareWrapper: ExpoView, KeyboardAwareScrollHandlerDelegate {
     }
     
     @objc private func keyboardWillChangeFrame(_ notification: Notification) {
-        // This handles interactive dismiss and height changes
+        // Track keyboard height changes for scroll button
         guard let userInfo = notification.userInfo,
-              let keyboardFrame = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
-              let duration = userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double,
-              let curve = userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt else { return }
+              let keyboardFrame = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
         
-        // Check if keyboard is visible based on frame position
         let screenHeight = UIScreen.main.bounds.height
-        let isVisibleByFrame = keyboardFrame.origin.y < screenHeight
+        let keyboardTop = keyboardFrame.origin.y
+        currentKeyboardHeight = max(0, screenHeight - keyboardTop)
         
-        // CRITICAL: Don't trust frame-based visibility if we know keyboard is open
-        // iOS can send misleading frame notifications during text input changes
-        let newKeyboardHeight: CGFloat
-        if isKeyboardOpen {
-            // Keyboard is definitely open, use the reported height (ignore visibility check)
-            newKeyboardHeight = keyboardFrame.height
-        } else if isVisibleByFrame {
-            // Keyboard appears to be visible by frame
-            newKeyboardHeight = keyboardFrame.height
-        } else {
-            // Keyboard not visible and not open - this is fine
-            newKeyboardHeight = 0
-        }
-        
-        // Only animate if keyboard height actually changed
-        guard newKeyboardHeight != currentKeyboardHeight else {
-            return
-        }
-        
-        currentKeyboardHeight = newKeyboardHeight
-        animateComposerAndButton(duration: duration, curve: curve)
+        // Update scroll button position (composer is handled by inputAccessoryView)
+        updateScrollButtonTransform()
     }
     
     private func handleKeyboardChange(notification: Notification, isShowing: Bool) {
@@ -160,53 +249,82 @@ class KeyboardAwareWrapper: ExpoView, KeyboardAwareScrollHandlerDelegate {
               let duration = userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double,
               let curve = userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt else { return }
         
-        // Track true keyboard state - this is authoritative
         isKeyboardOpen = isShowing
         currentKeyboardHeight = isShowing ? keyboardFrame.height : 0
         
         #if DEBUG
-        NSLog("[KeyboardWrapper] keyboard %@ height=%.0f", isShowing ? "show" : "hide", currentKeyboardHeight)
+        NSLog("[KeyboardWrapper] keyboard %@ height=%.0f accessory=%@", 
+              isShowing ? "show" : "hide", currentKeyboardHeight, 
+              isUsingInputAccessory ? "yes" : "no")
         #endif
         
-        animateComposerAndButton(duration: duration, curve: curve)
-    }
-    
-    private func animateComposerAndButton(duration: Double, curve: UInt) {
+        // Animate scroll button (composer is handled by inputAccessoryView)
         let options = UIView.AnimationOptions(rawValue: curve << 16)
-        
         UIView.animate(withDuration: duration, delay: 0, options: options) {
-            self.updateComposerTransform()
             self.updateScrollButtonTransform()
-            // Note: Don't call layoutIfNeeded() here - it causes React Native layout
-            // changes (like input growing) to animate unexpectedly
         }
     }
     
-    private func updateComposerTransform() {
-        guard let container = composerContainer else {
-            return
+    // MARK: - Input Accessory Management
+    
+    /// Move composer into inputAccessoryView for proper keyboard attachment
+    private func setupInputAccessory() {
+        guard !isUsingInputAccessory else { return }
+        guard let composer = composerView, let container = composerContainer else { return }
+        
+        // Store original parent info for restoration
+        originalComposerSuperview = container.superview
+        if let parent = originalComposerSuperview {
+            originalComposerIndex = parent.subviews.firstIndex(of: container) ?? 0
         }
         
-        // Native code handles ALL positioning:
-        // - When keyboard closed: move up by safe area (or min padding)
-        // - When keyboard open: move up by FULL keyboard height + gap
-        let translation: CGFloat
-        if currentKeyboardHeight > 0 {
-            // Keyboard open - position above keyboard using FULL keyboard height
-            // (not effectiveKeyboard, since we no longer have JS paddingBottom)
-            translation = -(currentKeyboardHeight + COMPOSER_KEYBOARD_GAP)
-        } else {
-            // Keyboard closed - position above safe area
-            let bottomOffset = max(safeAreaBottom, MIN_BOTTOM_PADDING)
-            translation = -bottomOffset
-        }
+        // Create and setup accessory controller
+        let controller = InputAccessoryHostController()
+        accessoryController = controller
         
-        // Check if transform is already correct to avoid unnecessary updates
-        let currentTranslation = container.transform.ty
-        if abs(currentTranslation - translation) > 0.5 {
-            container.transform = CGAffineTransform(translationX: 0, y: translation)
-        }
+        // Add controller's view (invisible) to our hierarchy
+        controller.view.frame = CGRect(x: 0, y: 0, width: bounds.width, height: 0)
+        addSubview(controller.view)
+        
+        // Move the composer container to the input accessory
+        container.removeFromSuperview()
+        controller.setComposerView(container)
+        
+        // Become first responder to show the accessory
+        controller.becomeFirstResponder()
+        
+        isUsingInputAccessory = true
+        
+        #if DEBUG
+        NSLog("[KeyboardWrapper] moved composer to inputAccessoryView")
+        #endif
     }
+    
+    /// Restore composer from inputAccessoryView back to React Native hierarchy
+    private func restoreComposerFromAccessory() {
+        guard isUsingInputAccessory else { return }
+        guard let container = composerContainer else { return }
+        
+        // Remove from accessory
+        container.removeFromSuperview()
+        
+        // Restore to original parent
+        if let parent = originalComposerSuperview {
+            parent.insertSubview(container, at: originalComposerIndex)
+        }
+        
+        // Clean up controller
+        accessoryController?.view.removeFromSuperview()
+        accessoryController?.resignFirstResponder()
+        accessoryController = nil
+        
+        isUsingInputAccessory = false
+        
+        #if DEBUG
+        NSLog("[KeyboardWrapper] restored composer from inputAccessoryView")
+        #endif
+    }
+    
     
     // MARK: - Scroll to Bottom Button
     
@@ -255,12 +373,11 @@ class KeyboardAwareWrapper: ExpoView, KeyboardAwareScrollHandlerDelegate {
     /// Base button offset (when keyboard is closed) - used for constraint
     private func calculateBaseButtonOffset() -> CGFloat {
         let composerHeight = lastComposerHeight > 0 ? lastComposerHeight : extraBottomInset
-        // Button sits just above the composer
-        // Since composer is transformed up by (safeAreaBottom or minPadding), 
-        // button needs same offset + composer height + gap
-        let bottomOffset = max(safeAreaBottom, MIN_BOTTOM_PADDING)
+        // InputAccessory height = composerHeight + max(safeArea + 8, 8)
+        // Button should be just above it
+        let accessoryBottomSpace = max(safeAreaBottom + 8, 8)
         let buttonGap: CGFloat = 8
-        return bottomOffset + composerHeight + buttonGap
+        return composerHeight + accessoryBottomSpace + buttonGap
     }
     
     /// Update button transform to animate with keyboard (called inside animation block)
@@ -393,8 +510,6 @@ class KeyboardAwareWrapper: ExpoView, KeyboardAwareScrollHandlerDelegate {
         }
         
         // Detect composer height changes from actual KeyboardComposerView frame
-        // This is more reliable than prop-based updates which may not trigger with Fabric
-        // We use composerView (not container) because container includes padding (safe area)
         if let composer = composerView {
             let currentHeight = composer.bounds.height
             if currentHeight > 0 && abs(currentHeight - lastComposerHeight) > 0.5 {
@@ -403,17 +518,13 @@ class KeyboardAwareWrapper: ExpoView, KeyboardAwareScrollHandlerDelegate {
                 // Update insets and scroll position
                 handleComposerHeightChange(newHeight: currentHeight, delta: delta)
                 lastComposerHeight = currentHeight
+                
+                // Update accessory height if using input accessory
+                accessoryController?.updateHeight()
             }
         }
         
-        // CRITICAL: Re-apply transforms after every layout
-        // React Native's layout system can reset transforms when views resize
-        if composerContainer != nil {
-            updateComposerTransform()
-        }
-        
-        // Update scroll button base position (for composer height changes)
-        // and re-apply transform (for keyboard state)
+        // Update scroll button position
         updateScrollButtonBasePosition()
         updateScrollButtonTransform()
         
@@ -456,45 +567,36 @@ class KeyboardAwareWrapper: ExpoView, KeyboardAwareScrollHandlerDelegate {
         let composer = findComposerView(in: self)
         
         if let sv = scrollView {
-            // Use actual composer view height if available (not container which includes padding)
+            // Use actual composer view height if available
             let composerHeight = composerView?.bounds.height ?? extraBottomInset
             let baseInset = composerHeight + CONTENT_GAP
             
-            // Set the base inset BEFORE attaching so it's applied immediately
-            // Note: scroll handler adds safeAreaBottom internally when keyboard is closed
             keyboardHandler.setBaseInset(baseInset)
             keyboardHandler.attach(to: sv)
             hasAttached = true
             #if DEBUG
             NSLog("[KeyboardWrapper] attached scrollView=%@", String(describing: type(of: sv)))
             #endif
-        } else {
-            // Will retry
         }
         
         // Find composer view and container
-        // - composerView: the actual KeyboardComposerView (for height measurement)
-        // - composerContainer: the top-level container that's a direct child of this wrapper (for transform animation)
         if let comp = composer {
             composerView = comp
             
             var container: UIView? = comp
-            var depth = 0
             while let parent = container?.superview, parent !== self {
                 container = parent
-                depth += 1
             }
             composerContainer = container
             
-            // Initialize lastComposerHeight from the actual composer view (not container which includes padding)
             lastComposerHeight = comp.bounds.height
             
-            // Apply initial transform (gap only, no keyboard)
-            updateComposerTransform()
+            // Setup input accessory for proper interactive dismiss
+            setupInputAccessory()
         }
         
-        // Retry if scroll view not found
-        if scrollView == nil {
+        // Retry if views not found
+        if scrollView == nil || composer == nil {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
                 self?.findAndAttachViews()
             }
@@ -551,4 +653,5 @@ class KeyboardAwareWrapper: ExpoView, KeyboardAwareScrollHandlerDelegate {
         keyboardHandler.scrollNewContentToTop(estimatedHeight: estimatedHeight)
     }
 }
+
 

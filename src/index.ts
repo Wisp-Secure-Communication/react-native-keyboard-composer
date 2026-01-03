@@ -19,6 +19,8 @@ export type {
   KeyboardComposerRef,
   KeyboardComposerViewProps,
   KeyboardComposerConstants,
+  KeyboardComposerContext,
   TextEventPayload,
   HeightEventPayload,
+  PTTState,
 } from "./KeyboardComposer.types";
